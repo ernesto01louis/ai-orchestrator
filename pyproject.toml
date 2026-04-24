@@ -1,0 +1,31 @@
+[project]
+name = "ai-orchestrator"
+version = "0.1.0"
+description = "Autonomous AI research orchestrator — platform for campaigns, evidence, and reproducibility."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+markers = [
+    "live: tests that hit the live orchestrator at http://127.0.0.1:8000 (requires the service to be running)",
+    "inprocess: tests that import app.py in-process via TestClient",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+# Phase 0: lenient. Tighten over time.
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # let formatter handle long lines
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+# Phase 0: only enforce strictness on freshly-extracted modules.
+files = ["core", "llm", "notifications", "tools", "execution"]
