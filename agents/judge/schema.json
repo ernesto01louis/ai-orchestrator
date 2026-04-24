@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "correctness": {"type": "number"},
+    "robustness": {"type": "number"},
+    "security": {"type": "number"},
+    "performance": {"type": "number"},
+    "structure": {"type": "number"},
+    "overall": {"type": "number"},
+    "improvements": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "required": ["correctness", "robustness", "security", "performance", "overall", "improvements"]
+}

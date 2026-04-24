@@ -1,0 +1,10 @@
+name: generator
+description: Generates executable code from plans and prompts
+version: 1
+output_mode: freeform
+system_prompt: null
+user_prompt: user_prompt.md
+identity: false
+variants_dir: variants
+defaults:
+  model_role: generator_models

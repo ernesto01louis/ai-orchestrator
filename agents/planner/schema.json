@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "language": {"type": "string"},
+    "entrypoint": {"type": "string"},
+    "project_type": {"type": "string"},
+    "execution_mode": {"type": "string"},
+    "port": {"type": "integer"},
+    "files": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "steps": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "required": ["language", "entrypoint", "project_type", "execution_mode", "files", "dependencies", "steps"]
+}

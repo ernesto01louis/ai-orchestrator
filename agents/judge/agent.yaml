@@ -1,0 +1,10 @@
+name: judge
+description: Evaluates code quality and returns structured scores with improvement suggestions
+version: 1
+output_mode: structured
+schema: schema.json
+system_prompt: system_prompt.md
+user_prompt: user_prompt.md
+identity: false
+defaults:
+  model_role: judge_model

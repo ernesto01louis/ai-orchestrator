@@ -1,0 +1,10 @@
+name: optimizer
+description: Improves code based on judge feedback and suggested improvements
+version: 1
+output_mode: freeform
+system_prompt: null
+user_prompt: user_prompt.md
+user_prompt_multi: user_prompt_multi.md
+identity: false
+defaults:
+  model_role: optimizer_model

@@ -1,0 +1,2 @@
+lang_hint: "Shell: bash"
+extra_rules: "- Do NOT require root/sudo unless absolutely necessary\n"

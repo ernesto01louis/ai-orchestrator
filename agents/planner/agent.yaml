@@ -1,0 +1,10 @@
+name: planner
+description: Creates structured implementation plans from user prompts
+version: 1
+output_mode: structured
+schema: schema.json
+system_prompt: system_prompt.md
+user_prompt: user_prompt.md
+identity: true
+defaults:
+  model_role: planner_model

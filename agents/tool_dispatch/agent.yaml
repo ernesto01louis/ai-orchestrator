@@ -1,0 +1,10 @@
+name: tool_dispatch
+description: Decides which tools to run before code generation to gather info or prepare the environment
+version: 1
+output_mode: structured
+schema: schema.json
+system_prompt: system_prompt.md
+user_prompt: user_prompt.md
+identity: false
+defaults:
+  model_role: planner_model

@@ -1,0 +1,92 @@
+{
+  "tools": [
+    {
+      "name": "list_packages",
+      "description": "List installed Python packages on the target system",
+      "parameters": {},
+      "handler": "builtin",
+      "command": "python3 -m pip list --format=json"
+    },
+    {
+      "name": "check_command",
+      "description": "Check whether a specific CLI command/binary is available on the target",
+      "parameters": {
+        "cmd": "The command name to check (e.g. ffmpeg, lsusb, git)"
+      },
+      "handler": "builtin",
+      "command": "which {cmd} && {cmd} --version 2>&1 | head -1 || echo 'not found'"
+    },
+    {
+      "name": "read_file",
+      "description": "Read the contents of an existing file on the target",
+      "parameters": {
+        "path": "Absolute path to the file to read"
+      },
+      "handler": "builtin",
+      "command": "cat {path}"
+    },
+    {
+      "name": "list_dir",
+      "description": "List the contents of a directory on the target",
+      "parameters": {
+        "path": "Absolute path to the directory to list"
+      },
+      "handler": "builtin",
+      "command": "ls -la {path}"
+    },
+    {
+      "name": "check_port",
+      "description": "Check whether a specific port is already in use on the target",
+      "parameters": {
+        "port": "The port number to check"
+      },
+      "handler": "builtin",
+      "command": "ss -tlnp | grep ':{port} ' || echo 'port {port} is free'"
+    },
+    {
+      "name": "read_existing_project",
+      "description": "Read all files from a previously deployed project on the target. Use when extending or modifying existing work.",
+      "parameters": {
+        "project": "The project name (directory under ~/ai-projects/)"
+      },
+      "handler": "builtin",
+      "command": "find ~/ai-projects/{project} -type f ! -path '*/.venv/*' ! -name '*.pyc' | head -20 | xargs -I{{}} sh -c 'echo \"=== {{}} ===\"; cat \"{{}}\"'"
+    },
+    {
+      "name": "create_dir",
+      "description": "Create a directory (and any missing parents) on the target",
+      "parameters": {
+        "path": "Absolute or home-relative path to create"
+      },
+      "handler": "builtin",
+      "command": "mkdir -p {path} && echo 'created: {path}'"
+    },
+    {
+      "name": "write_file",
+      "description": "Write a file with specified content to the target. Use for config files, .env files, static assets.",
+      "parameters": {
+        "path": "Absolute or home-relative path to write",
+        "content": "The full content to write to the file"
+      },
+      "handler": "write_file"
+    },
+    {
+      "name": "install_package",
+      "description": "Install one or more Python packages via pip on the target (into the system Python, not a venv)",
+      "parameters": {
+        "packages": "Space-separated list of packages to install (e.g. 'requests flask')"
+      },
+      "handler": "builtin",
+      "command": "pip install --disable-pip-version-check {packages} 2>&1 | tail -3"
+    },
+    {
+      "name": "run_command",
+      "description": "Run an arbitrary shell command on the target. Use for setup tasks, service checks, or anything not covered by other tools.",
+      "parameters": {
+        "cmd": "The shell command to run"
+      },
+      "handler": "builtin",
+      "command": "{cmd}"
+    }
+  ]
+}

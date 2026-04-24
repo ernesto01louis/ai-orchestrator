@@ -1,0 +1,6 @@
+lang_hint: "Node.js: {{node_version}}"
+extra_rules: |
+  - Use ONLY Node.js built-in modules (http, https, os, fs, path, crypto, url, child_process, etc.)
+  - Do NOT use express, fastify, uuid, winston, or any npm packages
+  - For HTTP servers use: const http = require('http')
+  - For system info use: const os = require('os')
