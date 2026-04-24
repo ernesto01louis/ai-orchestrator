@@ -1,0 +1,66 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+config.json
+config.json.bak.*
+config.local.json
+
+# Runtime state / data (not source-controlled)
+logs/
+memory/embedding_cache.json
+memory/prompt_index.json
+memory/run_index.json
+memory/negative_memory.json
+memory/session_log.json
+memory/model_stats.json
+memory/dream_log.json
+memory/lessons/
+memory/targets/
+memory/primer.md
+gates.json
+gates_log.json
+vault/
+references/
+projects/
+
+# Claude Code local project settings
+.claude/
+
+# Heavy UI assets (Thanatos personalization — not platform code, kept locally)
+ui/references/
+ui/*.mp4
+ui/*.mov
+ui/Kazuki.png
+ui/kazuki_sprites.png
+
+# Generated UI bundles (source stays tracked)
+ui/node_modules/
+ui/dist/
+ui/.git
+*.bak.*
+
+# GPU services live alongside; keep out of orchestrator repo
+gpu-services/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# Node
+node_modules/

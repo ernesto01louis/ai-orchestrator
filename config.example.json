@@ -1,0 +1,105 @@
+{
+  "_comment": "Example configuration. Copy to config.json and fill in real values. Secrets (tokens, API keys) should live in .env instead; see .env.example.",
+  "ollama": {
+    "main_url": "http://OLLAMA_MAIN_HOST:11434",
+    "judge_url": "http://OLLAMA_JUDGE_HOST:11434",
+    "planner_url": "http://OLLAMA_JUDGE_HOST:11434",
+    "judge_fallback_model": "qwen2.5:72b"
+  },
+  "hindsight": {
+    "enabled": false,
+    "url": "http://HINDSIGHT_HOST:8888",
+    "bank_id": "Orchestrator",
+    "timeout": 120
+  },
+  "notifications": {
+    "enabled": false,
+    "service": "gotify",
+    "ntfy_url": "http://NTFY_HOST:8090",
+    "ntfy_topic": "ai-orchestrator",
+    "ntfy_priority": "default",
+    "gotify_url": "http://GOTIFY_HOST:80",
+    "_gotify_token_note": "Set GOTIFY_TOKEN in .env, not here.",
+    "gotify_priority": 5,
+    "on_success": true,
+    "on_failure": true,
+    "orchestrator_url": "http://ORCHESTRATOR_PUBLIC_HOST:8000",
+    "ntfy_urls": [],
+    "gotify_urls": [],
+    "strategy": "all"
+  },
+  "vault": {
+    "enabled": false,
+    "local_dir": "/opt/ai-orchestrator/vault",
+    "remote_host": "VAULT_REMOTE_HOST",
+    "remote_user": "root",
+    "remote_key": "/root/.ssh/id_rsa",
+    "remote_dir": "/opt/notediscovery/data",
+    "sync_enabled": false,
+    "nas_enabled": false,
+    "nas_path": "/mnt/nas-vault/ai-orchestrator-vault"
+  },
+  "generation": {
+    "parallel": true
+  },
+  "autonomy": {
+    "enabled": true,
+    "max_iterations": 3,
+    "target_score": 9.0,
+    "max_troubleshoot_attempts": 3
+  },
+  "ssh": {
+    "timeout": 120
+  },
+  "timeouts": {
+    "embedding": 1800,
+    "llm_generate": 2400,
+    "llm_structured": 2400,
+    "hindsight_retain": 600,
+    "hindsight_recall": 120,
+    "hindsight_reflect": 600,
+    "vault_sync": 180,
+    "vault_nas_sync": 120
+  },
+  "sudo": {
+    "enabled": false,
+    "allowed_commands": [
+      "apt-get install -y",
+      "apt-get update",
+      "npm install -g",
+      "systemctl start",
+      "systemctl stop",
+      "systemctl restart",
+      "systemctl enable",
+      "systemctl status"
+    ]
+  },
+  "deploy": {
+    "base_path": "~/ai-projects"
+  },
+  "debug": {
+    "verbose": false
+  },
+  "ssh_targets": [
+    {
+      "name": "example-target",
+      "host": "TARGET_HOST",
+      "username": "TARGET_USER",
+      "key_path": "/root/.ssh/id_rsa"
+    }
+  ],
+  "cloud_image_gen": {
+    "enabled": false,
+    "provider": "replicate",
+    "_api_key_note": "Set REPLICATE_API_TOKEN in .env; leave api_key blank here.",
+    "api_key": "",
+    "default_model": "black-forest-labs/flux-dev",
+    "fallback": {
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-image",
+      "_api_key_note": "Set GEMINI_API_KEY in .env.",
+      "api_key": ""
+    }
+  },
+  "mcp_servers": {}
+}
