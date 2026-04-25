@@ -33,16 +33,12 @@ def test_repair_json_round_trip():
     assert parsed["meta"]["trailing"] == "comma"
 
 
-@pytest.mark.xfail(
-    reason="_ws_broadcast cross-thread async bug; fixed in Phase 0.e",
-    strict=False,  # current behavior may either silently drop or raise; either is failure
-)
 def test_ws_broadcast_from_background_thread():
-    """Calling _ws_broadcast from a non-loop thread must still deliver to clients.
+    """Calling _ws_broadcast from a non-loop thread must deliver to clients.
 
-    Today it either fails silently (asyncio.ensure_future on the wrong loop)
-    or marks the client dead via the bare exception handler. Either way the
-    received-messages list stays empty.
+    Fixed in Phase 0.e: _lifespan now captures the running loop, and
+    _ws_broadcast uses asyncio.run_coroutine_threadsafe to post the
+    coroutine onto that loop from any thread.
     """
     from fastapi.testclient import TestClient
 
@@ -66,8 +62,11 @@ def test_ws_broadcast_from_background_thread():
             t.start()
             t.join(timeout=3.0)
 
+            # Starlette's WebSocketTestSession.receive_text() blocks until a
+            # message is buffered; broadcaster has already completed (joined
+            # above), so the message must be ready or the broadcast was lost.
             try:
-                msg = ws.receive_text(timeout=2.0)
+                msg = ws.receive_text()
                 received.append(msg)
             except Exception:  # noqa: BLE001
                 pass

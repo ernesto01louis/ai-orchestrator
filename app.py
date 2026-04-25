@@ -5,6 +5,7 @@ import json
 import re
 import os
 import ast
+import asyncio
 import math
 import fcntl
 import time
@@ -47,6 +48,9 @@ import contextlib
 
 @contextlib.asynccontextmanager
 async def _lifespan(app_instance):
+    # Capture the running event loop so background threads can post coroutines
+    # back via asyncio.run_coroutine_threadsafe (used by _ws_broadcast).
+    set_main_loop(asyncio.get_running_loop())
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield
@@ -340,22 +344,37 @@ def _init_run_status(run_id, **kwargs):
 # ── WebSocket live broadcast ──────────────────────
 _ws_clients: list = []
 _ws_lock = threading.Lock()
+_MAIN_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Captured by `_lifespan` at startup so background threads can post
+    coroutines back onto the FastAPI event loop via run_coroutine_threadsafe.
+    """
+    global _MAIN_LOOP
+    _MAIN_LOOP = loop
 
 
 def _ws_broadcast(msg: dict):
-    """Send a JSON message to all connected WebSocket clients (non-blocking)."""
-    dead = []
+    """Send a JSON message to all connected WebSocket clients.
+
+    Safe to call from any thread: the actual `ws.send_text` coroutine is
+    scheduled on the captured main loop via asyncio.run_coroutine_threadsafe.
+    Each send is bounded by a 2 s timeout; clients that error are evicted.
+    """
+    if _MAIN_LOOP is None:
+        # startup hasn't completed; no clients are subscribed yet anyway
+        return
     with _ws_lock:
         clients = list(_ws_clients)
+    if not clients:
+        return
     payload = json.dumps(msg)
+    dead: list = []
     for ws in clients:
         try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(ws.send_text(payload))
-            else:
-                loop.run_until_complete(ws.send_text(payload))
+            fut = asyncio.run_coroutine_threadsafe(ws.send_text(payload), _MAIN_LOOP)
+            fut.result(timeout=2.0)
         except Exception:
             dead.append(ws)
     if dead:
@@ -380,7 +399,7 @@ FILE_MARKER = re.compile(
     re.MULTILINE
 )
 
-SAFE_FILENAME = re.compile(r"^[a-zA-Z0-9_\-\./]+$")
+SAFE_FILENAME = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$")
 
 
 # ------------------------------------------------
