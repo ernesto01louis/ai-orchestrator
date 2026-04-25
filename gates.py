@@ -26,9 +26,12 @@ from datetime import datetime
 from pathlib import Path
 
 
-GATES_FILE = "/opt/ai-orchestrator/gates.json"
-LESSONS_DIR = "/opt/ai-orchestrator/memory/lessons"
-GATES_LOG = "/opt/ai-orchestrator/memory/gates_log.json"
+try:
+    from core.paths import GATES_FILE, LESSONS_DIR, GATES_LOG  # type: ignore
+except ImportError:  # standalone use without core/ on path
+    GATES_FILE = "/opt/ai-orchestrator/gates.json"
+    LESSONS_DIR = "/opt/ai-orchestrator/memory/lessons"
+    GATES_LOG = "/opt/ai-orchestrator/memory/gates_log.json"
 
 # Auto-promotion threshold: if a lesson pattern appears this many times, it becomes a gate
 AUTO_PROMOTE_THRESHOLD = 3

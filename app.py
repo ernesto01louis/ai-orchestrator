@@ -24,6 +24,47 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# ── core/: paths, config, locks, runtime state ────
+from core.paths import (
+    CONFIG_PATH, PROJECTS_DIR, LOG_DIR, MEMORY_DIR, REFERENCE_DIR,
+    SANDBOX_DIR, SANDBOX_VENV,
+    RUN_INDEX_FILE, PROMPT_INDEX, EMBED_CACHE, NEGATIVE_MEMORY, MODEL_STATS,
+    SESSION_LOG, IDENTITY_FILE, PRIMER_FILE, GOALS_FILE, TARGET_IDENTITY_DIR,
+    TOOL_REGISTRY_PATH,
+)
+from core.config import (
+    CONFIG,
+    OLLAMA_MAIN_URL, OLLAMA_JUDGE_URL, OLLAMA_PLANNER_URL,
+    OLLAMA_MAIN, OLLAMA_JUDGE, OLLAMA_MAIN_CHAT, OLLAMA_JUDGE_CHAT,
+    OLLAMA_PLANNER_CHAT, OLLAMA_PLANNER, OLLAMA_EMBED,
+    HINDSIGHT_URL, HINDSIGHT_BANK, HINDSIGHT_ENABLED, HINDSIGHT_TIMEOUT,
+    NOTIFY_CONFIG, NOTIFY_ENABLED, NOTIFY_SERVICE,
+    NTFY_URL, NTFY_TOPIC, NTFY_PRIORITY, NTFY_URLS,
+    GOTIFY_URL, GOTIFY_TOKEN, GOTIFY_PRIORITY, GOTIFY_URLS,
+    NOTIFY_ON_SUCCESS, NOTIFY_ON_FAILURE,
+    ORCHESTRATOR_URL, NOTIFY_STRATEGY,
+    VAULT_CONFIG, VAULT_ENABLED, VAULT_LOCAL_DIR,
+    VAULT_REMOTE_HOST, VAULT_REMOTE_USER, VAULT_REMOTE_KEY, VAULT_REMOTE_DIR,
+    VAULT_SYNC_ENABLED, VAULT_NAS_ENABLED, VAULT_NAS_PATH,
+    SSH_TARGETS, SSH_TIMEOUT, DEPLOY_BASE,
+    TARGET_SCORE, MAX_ITERATIONS, MAX_TROUBLESHOOT_ATTEMPTS,
+    JUDGE_FALLBACK_MODEL,
+    SIMILARITY_THRESHOLD, REUSE_SCORE_THRESHOLD,
+    MAX_PROMPT_INDEX_ENTRIES, MAX_EMBED_CACHE_ENTRIES,
+    TIMEOUT_EMBEDDING, TIMEOUT_LLM_GENERATE, TIMEOUT_LLM_STRUCTURED,
+    TIMEOUT_HINDSIGHT_RETAIN, TIMEOUT_HINDSIGHT_RECALL, TIMEOUT_HINDSIGHT_REFLECT,
+    TIMEOUT_VAULT_SYNC, TIMEOUT_VAULT_NAS_SYNC,
+    DREAM_AUTO_INTERVAL,
+)
+from core.locks import locked_read_json, locked_write_json
+from core.runtime import (
+    RUN_STATUS, ORCHESTRATOR_PAUSED,
+    _ws_clients, _ws_lock, _MAIN_LOOP, set_main_loop,
+    _ws_broadcast, log,
+    _update_run_status, _init_run_status,
+    _load_run_index, _persist_run_index,
+)
+
 from agents.loader import load_agent, load_all_agents, reload_all as reload_agents, list_roles as list_agent_roles
 from dream import run_dream, DREAM_LOG, _load_json as dream_load_json
 from gates import (
@@ -64,26 +105,6 @@ _mcp_starlette = mcp_instance.streamable_http_app()
 _mcp_starlette.lifespan_handler = None
 app.mount("/mcp", _mcp_starlette)
 
-CONFIG_PATH = "/opt/ai-orchestrator/config.json"
-
-with open(CONFIG_PATH) as f:
-    CONFIG = json.load(f)
-
-OLLAMA_MAIN_URL = CONFIG["ollama"]["main_url"]
-OLLAMA_JUDGE_URL = CONFIG["ollama"]["judge_url"]
-# planner_url defaults to judge_url (reasoning models are usually on the larger box)
-OLLAMA_PLANNER_URL = CONFIG["ollama"].get("planner_url", OLLAMA_JUDGE_URL)
-
-# /api/generate for free-form code output
-OLLAMA_MAIN = OLLAMA_MAIN_URL + "/api/generate"
-OLLAMA_JUDGE = OLLAMA_JUDGE_URL + "/api/generate"
-
-# /api/chat for structured JSON output (supports format parameter)
-OLLAMA_MAIN_CHAT = OLLAMA_MAIN_URL + "/api/chat"
-OLLAMA_JUDGE_CHAT = OLLAMA_JUDGE_URL + "/api/chat"
-OLLAMA_PLANNER_CHAT = OLLAMA_PLANNER_URL + "/api/chat"
-OLLAMA_PLANNER = OLLAMA_PLANNER_URL + "/api/generate"
-
 # ── MODEL-AWARE URL ROUTING ──────────────────────
 # Routes requests to whichever server actually has the model.
 # Checked in priority order: main → judge/planner → fallback to planner.
@@ -119,79 +140,6 @@ def resolve_generate_url(model: str) -> str:
         _refresh_url_cache()
     base = _url_cache.get(model, OLLAMA_MAIN_URL)
     return base + "/api/generate"
-
-OLLAMA_EMBED = OLLAMA_MAIN_URL + "/api/embeddings"
-
-# Hindsight memory server (Layer 4)
-HINDSIGHT_URL = CONFIG.get("hindsight", {}).get("url", "http://192.168.2.203:8888")
-HINDSIGHT_BANK = CONFIG.get("hindsight", {}).get("bank_id", "Orchestrator")
-HINDSIGHT_ENABLED = CONFIG.get("hindsight", {}).get("enabled", True)
-HINDSIGHT_TIMEOUT = CONFIG.get("hindsight", {}).get("timeout", 120)
-
-# ------------------------------------------------
-# NOTIFICATIONS (ntfy / Gotify)
-# ------------------------------------------------
-
-NOTIFY_CONFIG = CONFIG.get("notifications", {})
-NOTIFY_ENABLED = NOTIFY_CONFIG.get("enabled", False)
-NOTIFY_SERVICE = NOTIFY_CONFIG.get("service", "ntfy")  # "ntfy" or "gotify"
-NTFY_URL = NOTIFY_CONFIG.get("ntfy_url", "https://ntfy.sh")
-NTFY_TOPIC = NOTIFY_CONFIG.get("ntfy_topic", "ai-orchestrator")
-NTFY_PRIORITY = NOTIFY_CONFIG.get("ntfy_priority", "default")
-GOTIFY_URL = NOTIFY_CONFIG.get("gotify_url", "")
-GOTIFY_TOKEN = os.getenv("GOTIFY_TOKEN", "") or NOTIFY_CONFIG.get("gotify_token", "")
-GOTIFY_PRIORITY = NOTIFY_CONFIG.get("gotify_priority", 5)
-NOTIFY_ON_SUCCESS = NOTIFY_CONFIG.get("on_success", True)
-NOTIFY_ON_FAILURE = NOTIFY_CONFIG.get("on_failure", True)
-
-# Multi-URL fallback: try each URL in order until one succeeds
-NTFY_URLS = NOTIFY_CONFIG.get("ntfy_urls", [NTFY_URL])
-GOTIFY_URLS = NOTIFY_CONFIG.get("gotify_urls", [GOTIFY_URL] if GOTIFY_URL else [])
-ORCHESTRATOR_URL = NOTIFY_CONFIG.get("orchestrator_url", "http://192.168.2.216:8000")
-NOTIFY_STRATEGY = NOTIFY_CONFIG.get("strategy", "failover")  # "failover" or "all"
-
-
-# ------------------------------------------------
-# VAULT (L5 — NoteDiscovery / Obsidian)
-# ------------------------------------------------
-
-VAULT_CONFIG = CONFIG.get("vault", {})
-VAULT_ENABLED = VAULT_CONFIG.get("enabled", False)
-VAULT_LOCAL_DIR = VAULT_CONFIG.get("local_dir", "/opt/ai-orchestrator/vault")
-VAULT_REMOTE_HOST = VAULT_CONFIG.get("remote_host", "")
-VAULT_REMOTE_USER = VAULT_CONFIG.get("remote_user", "root")
-VAULT_REMOTE_KEY = VAULT_CONFIG.get("remote_key", "/root/.ssh/id_rsa")
-VAULT_REMOTE_DIR = VAULT_CONFIG.get("remote_dir", "/opt/notediscovery/data")
-VAULT_SYNC_ENABLED = VAULT_CONFIG.get("sync_enabled", True)
-
-# NAS vault mirror (SMB/NFS mount)
-VAULT_NAS_ENABLED = VAULT_CONFIG.get("nas_enabled", False)
-VAULT_NAS_PATH = VAULT_CONFIG.get("nas_path", "/mnt/nas-vault/ai-orchestrator-vault")
-
-
-
-
-SSH_TARGETS = {t["name"]: t for t in CONFIG["ssh_targets"]}
-
-PROJECTS_DIR = "/opt/ai-orchestrator/projects"
-LOG_DIR = "/opt/ai-orchestrator/logs"
-MEMORY_DIR = "/opt/ai-orchestrator/memory"
-
-Path(PROJECTS_DIR).mkdir(parents=True, exist_ok=True)
-Path(LOG_DIR).mkdir(parents=True, exist_ok=True)
-Path(MEMORY_DIR).mkdir(parents=True, exist_ok=True)
-
-RUN_INDEX_FILE = Path(MEMORY_DIR) / "run_index.json"
-PROMPT_INDEX = Path(MEMORY_DIR) / "prompt_index.json"
-EMBED_CACHE = Path(MEMORY_DIR) / "embedding_cache.json"
-NEGATIVE_MEMORY = Path(MEMORY_DIR) / "negative_memory.json"
-MODEL_STATS = Path(MEMORY_DIR) / "model_stats.json"
-
-# Layer 1/2/Goal memory files (markdown)
-IDENTITY_FILE = Path(MEMORY_DIR) / "identity.md"
-PRIMER_FILE = Path(MEMORY_DIR) / "primer.md"
-GOALS_FILE = Path(MEMORY_DIR) / "goals.md"
-SESSION_LOG = Path(MEMORY_DIR) / "session_log.json"
 
 if not PROMPT_INDEX.exists():
     PROMPT_INDEX.write_text("[]")
@@ -236,154 +184,8 @@ if not GOALS_FILE.exists():
 # Initialize Gates safety system
 init_gates()
 
-# Dream auto-trigger config: run dream after every N completed runs
-DREAM_AUTO_INTERVAL = CONFIG.get("dream", {}).get("auto_interval", 10)
 _run_counter_since_dream = 0
 
-TARGET_SCORE = CONFIG["autonomy"]["target_score"]
-MAX_ITERATIONS = CONFIG["autonomy"]["max_iterations"]
-MAX_TROUBLESHOOT_ATTEMPTS = CONFIG["autonomy"].get("max_troubleshoot_attempts", 3)
-
-# fallback judge: used when judge_url box is unreachable
-JUDGE_FALLBACK_MODEL = CONFIG["ollama"].get("judge_fallback_model", "")
-
-SIMILARITY_THRESHOLD = 0.93
-REUSE_SCORE_THRESHOLD = 9
-
-# memory size limits
-MAX_PROMPT_INDEX_ENTRIES = 1000
-MAX_EMBED_CACHE_ENTRIES  = 2000
-
-SSH_TIMEOUT = CONFIG.get("ssh", {}).get("timeout", 120)
-
-# configurable timeouts (seconds) — config overrides, with sane minimums
-_TIMEOUTS = CONFIG.get("timeouts", {})
-TIMEOUT_EMBEDDING      = max(30,  _TIMEOUTS.get("embedding", 1800))
-TIMEOUT_LLM_GENERATE   = max(60,  _TIMEOUTS.get("llm_generate", 2400))
-TIMEOUT_LLM_STRUCTURED = max(60,  _TIMEOUTS.get("llm_structured", 2400))
-TIMEOUT_HINDSIGHT_RETAIN  = max(30, _TIMEOUTS.get("hindsight_retain", 600))
-TIMEOUT_HINDSIGHT_RECALL  = max(10, _TIMEOUTS.get("hindsight_recall", 120))
-TIMEOUT_HINDSIGHT_REFLECT = max(30, _TIMEOUTS.get("hindsight_reflect", 600))
-TIMEOUT_VAULT_SYNC     = max(30,  _TIMEOUTS.get("vault_sync", 180))
-TIMEOUT_VAULT_NAS_SYNC = max(15,  _TIMEOUTS.get("vault_nas_sync", 120))
-
-# sandbox paths (disposable, for testing)
-SANDBOX_DIR = "/tmp/ai_sandbox"
-SANDBOX_VENV = "/tmp/ai_env"
-
-# persistent deploy base (configurable per target, or global default)
-DEPLOY_BASE = CONFIG.get("deploy", {}).get("base_path", "~/ai-projects")
-
-RUN_STATUS = {}
-_run_status_lock = threading.Lock()
-ORCHESTRATOR_PAUSED = False
-
-
-def _update_run_status(run_id, **kwargs):
-    """Thread-safe update of RUN_STATUS fields."""
-    with _run_status_lock:
-        if run_id not in RUN_STATUS:
-            RUN_STATUS[run_id] = {
-                "phase": "", "score": 0, "completed": False,
-                "result": None, "error": None
-            }
-        RUN_STATUS[run_id].update(kwargs)
-        snapshot = dict(RUN_STATUS[run_id])
-    # broadcast significant state changes
-    if any(k in kwargs for k in ("phase", "score", "completed", "error")):
-        _ws_broadcast({"type": "status", "run_id": run_id,
-                        "phase": snapshot.get("phase", ""),
-                        "score": snapshot.get("score", 0),
-                        "completed": snapshot.get("completed", False),
-                        "error": snapshot.get("error"),
-                        "project": snapshot.get("project", ""),
-                        "target": snapshot.get("target", "")})
-    # Persist to run index when completed
-    if kwargs.get("completed"):
-        _persist_run_index(run_id, snapshot)
-
-
-def _load_run_index():
-    """Load the persistent run index from disk."""
-    try:
-        with open(RUN_INDEX_FILE) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _persist_run_index(run_id, snapshot):
-    """Save a completed run's metadata to the persistent run index."""
-    try:
-        index = _load_run_index()
-        index[run_id] = {
-            "phase": snapshot.get("phase", "completed"),
-            "score": snapshot.get("score", 0),
-            "completed": True,
-            "project": snapshot.get("project", ""),
-            "target": snapshot.get("target", ""),
-            "has_error": snapshot.get("error") is not None,
-            "error_msg": str(snapshot["error"])[:200] if snapshot.get("error") else None,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-        with open(RUN_INDEX_FILE, "w") as f:
-            json.dump(index, f, indent=2)
-    except OSError:
-        pass
-
-
-def _init_run_status(run_id, **kwargs):
-    """Thread-safe initialization of a new run entry."""
-    with _run_status_lock:
-        RUN_STATUS[run_id] = {
-            "phase": "queued", "score": 0, "completed": False,
-            "result": None, "error": None, "_judge_primary_down": False,
-            **kwargs
-        }
-
-# ── WebSocket live broadcast ──────────────────────
-_ws_clients: list = []
-_ws_lock = threading.Lock()
-_MAIN_LOOP: asyncio.AbstractEventLoop | None = None
-
-
-def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
-    """Captured by `_lifespan` at startup so background threads can post
-    coroutines back onto the FastAPI event loop via run_coroutine_threadsafe.
-    """
-    global _MAIN_LOOP
-    _MAIN_LOOP = loop
-
-
-def _ws_broadcast(msg: dict):
-    """Send a JSON message to all connected WebSocket clients.
-
-    Safe to call from any thread: the actual `ws.send_text` coroutine is
-    scheduled on the captured main loop via asyncio.run_coroutine_threadsafe.
-    Each send is bounded by a 2 s timeout; clients that error are evicted.
-    """
-    if _MAIN_LOOP is None:
-        # startup hasn't completed; no clients are subscribed yet anyway
-        return
-    with _ws_lock:
-        clients = list(_ws_clients)
-    if not clients:
-        return
-    payload = json.dumps(msg)
-    dead: list = []
-    for ws in clients:
-        try:
-            fut = asyncio.run_coroutine_threadsafe(ws.send_text(payload), _MAIN_LOOP)
-            fut.result(timeout=2.0)
-        except Exception:
-            dead.append(ws)
-    if dead:
-        with _ws_lock:
-            for ws in dead:
-                try:
-                    _ws_clients.remove(ws)
-                except ValueError:
-                    pass
 
 
 SAFE_PKG_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.\[\]<>=!,]+$")
@@ -627,79 +429,6 @@ def send_api_cheatsheet_notification(run_id=None, project_name=None, target=None
     if run_id:
         lines.extend([f"```", f"curl {ORCHESTRATOR_URL}/status/{run_id}", f"curl {ORCHESTRATOR_URL}/files/{run_id}", f"```"])
     send_notification("📖 API Cheatsheet", "\n".join(lines), priority=3)
-
-
-# ------------------------------------------------
-# LOGGING
-# ------------------------------------------------
-
-def log(run_id, message):
-
-    ts = datetime.utcnow().strftime("%H:%M:%S")
-    line = f"[{ts}] [{run_id}] {message}"
-
-    print(line)
-
-    log_path = Path(LOG_DIR) / f"{run_id}.log"
-
-    try:
-        with open(log_path, "a") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            try:
-                f.write(line + "\n")
-            finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
-    except OSError as e:
-        print(f"WARNING: could not write to log file: {e}")
-
-    _update_run_status(run_id, phase=message)
-
-    # broadcast to WebSocket clients
-    _ws_broadcast({"type": "log", "run_id": run_id, "line": line, "phase": message})
-
-
-# ------------------------------------------------
-# FILE LOCKING HELPERS
-# ------------------------------------------------
-
-def locked_read_json(path, default):
-    try:
-        with open(path, "r") as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
-            try:
-                data = json.load(f)
-            finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
-            return data
-    except (json.JSONDecodeError, ValueError) as e:
-        print(f"WARNING: corrupt JSON in {path}, resetting: {e}")
-        return default
-    except FileNotFoundError:
-        return default
-    except OSError as e:
-        print(f"WARNING: could not read {path}: {e}")
-        return default
-
-
-def locked_write_json(path, data):
-    try:
-        with open(path, "r+") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            try:
-                f.seek(0)
-                f.truncate()
-                json.dump(data, f, indent=2)
-            finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
-    except FileNotFoundError:
-        with open(path, "w") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            try:
-                json.dump(data, f, indent=2)
-            finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
-    except OSError as e:
-        print(f"WARNING: could not write {path}: {e}")
 
 
 # ------------------------------------------------

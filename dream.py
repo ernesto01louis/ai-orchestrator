@@ -20,9 +20,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-MEMORY_DIR = "/opt/ai-orchestrator/memory"
-VAULT_DIR = "/opt/ai-orchestrator/vault"
-DREAM_LOG = Path(MEMORY_DIR) / "dream_log.json"
+try:
+    from core.paths import MEMORY_DIR, DREAM_LOG, VAULT_DIR_DEFAULT as VAULT_DIR  # type: ignore
+except ImportError:  # standalone use without core/ on path
+    MEMORY_DIR = "/opt/ai-orchestrator/memory"
+    VAULT_DIR = "/opt/ai-orchestrator/vault"
+    DREAM_LOG = Path(MEMORY_DIR) / "dream_log.json"
 
 # Consolidation thresholds
 DUPLICATE_COSINE_THRESHOLD = 0.95   # prompts this similar are considered duplicates
