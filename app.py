@@ -105,41 +105,16 @@ _mcp_starlette = mcp_instance.streamable_http_app()
 _mcp_starlette.lifespan_handler = None
 app.mount("/mcp", _mcp_starlette)
 
-# ── MODEL-AWARE URL ROUTING ──────────────────────
-# Routes requests to whichever server actually has the model.
-# Checked in priority order: main → judge/planner → fallback to planner.
-_url_cache: dict = {}
-_url_cache_ts: float = 0.0
-_URL_CACHE_TTL = 300  # seconds
-
-def _refresh_url_cache():
-    global _url_cache, _url_cache_ts
-    cache = {}
-    # Check each unique server; main is preferred so check last (so it wins on conflict)
-    for base_url in dict.fromkeys([OLLAMA_JUDGE_URL, OLLAMA_MAIN_URL]):
-        try:
-            r = requests.get(f"{base_url}/api/tags", timeout=5)
-            if r.ok:
-                for m in r.json().get("models", []):
-                    cache[m["name"]] = base_url
-        except (requests.exceptions.RequestException, ValueError):
-            pass
-    _url_cache = cache
-    _url_cache_ts = time.time()
-
-def resolve_chat_url(model: str) -> str:
-    """Return the /api/chat URL for the server that has this model."""
-    if time.time() - _url_cache_ts > _URL_CACHE_TTL:
-        _refresh_url_cache()
-    base = _url_cache.get(model, OLLAMA_PLANNER_URL)
-    return base + "/api/chat"
-
-def resolve_generate_url(model: str) -> str:
-    """Return the /api/generate URL for the server that has this model."""
-    if time.time() - _url_cache_ts > _URL_CACHE_TTL:
-        _refresh_url_cache()
-    base = _url_cache.get(model, OLLAMA_MAIN_URL)
-    return base + "/api/generate"
+from llm.ollama import (  # noqa: E402
+    query_ollama_api, query_ollama, query_ollama_structured,
+    resolve_chat_url, resolve_generate_url, _refresh_url_cache,
+)
+import llm.ollama as _llm_ollama  # for _url_cache / _url_cache_ts access in /models endpoints
+from llm.repair import repair_json, safe_parse_json  # noqa: E402
+from llm.extract import (  # noqa: E402
+    extract_code, extract_files, format_files_for_prompt,
+    LLM_ARTIFACTS, FILE_MARKER,
+)
 
 if not PROMPT_INDEX.exists():
     PROMPT_INDEX.write_text("[]")
@@ -190,17 +165,7 @@ _run_counter_since_dream = 0
 
 SAFE_PKG_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.\[\]<>=!,]+$")
 
-LLM_ARTIFACTS = re.compile(
-    r"\[/?PYTHON\]|\[/?CODE\]|\[/?INST\]|\[/?OUTPUT\]|"
-    r"<\|endoftext\|>|<\|im_end\|>|<\|im_start\|>.*?\n",
-    re.IGNORECASE
-)
-
-FILE_MARKER = re.compile(
-    r"^#\s*={2,}\s*FILE:\s*(.+?)\s*={2,}\s*$",
-    re.MULTILINE
-)
-
+# LLM_ARTIFACTS and FILE_MARKER are imported from llm.extract above
 SAFE_FILENAME = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$")
 
 
@@ -982,16 +947,6 @@ def auto_update_target_identity(target_name, env_data, run_id):
 # ------------------------------------------------
 # LAYER 3: LIVE CONTEXT (gathered at launch)
 # ------------------------------------------------
-
-def query_ollama_api(base_url, endpoint, timeout=10):
-    """Quick GET to an Ollama API endpoint. Returns parsed JSON or None."""
-    try:
-        r = requests.get(f"{base_url}{endpoint}", timeout=timeout)
-        r.raise_for_status()
-        return r.json()
-    except (requests.exceptions.RequestException, json.JSONDecodeError):
-        return None
-
 
 def get_loaded_models():
     """Check which models are currently loaded in memory on both Ollama servers."""
@@ -2633,278 +2588,6 @@ class OrchestrateRequest(BaseModel):
     max_iterations: int | None = None
     deploy_target: str
     reference_files: list[str] | None = None
-
-
-# ------------------------------------------------
-# JSON REPAIR
-# attempts to fix common LLM JSON mistakes
-# ------------------------------------------------
-
-def repair_json(text):
-    """
-    Try to fix common JSON issues from LLMs:
-    - Strip markdown fences and preamble
-    - Fix single quotes -> double quotes
-    - Remove trailing commas
-    - Fix unescaped backslashes in strings
-    """
-
-    # strip markdown code fences
-    text = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
-    text = re.sub(r"\n?```\s*$", "", text.strip())
-
-    # strip any preamble before the first { or [
-    first_brace = text.find("{")
-    first_bracket = text.find("[")
-
-    if first_brace == -1 and first_bracket == -1:
-        return text
-
-    starts = [i for i in [first_brace, first_bracket] if i >= 0]
-    text = text[min(starts):]
-
-    # find matching end
-    depth = 0
-    end = 0
-    opener = text[0]
-    closer = "}" if opener == "{" else "]"
-
-    for i, ch in enumerate(text):
-        if ch == opener:
-            depth += 1
-        elif ch == closer:
-            depth -= 1
-        if depth == 0:
-            end = i
-            break
-
-    if end > 0:
-        text = text[:end + 1]
-
-    # fix trailing commas before } or ]
-    text = re.sub(r",\s*([}\]])", r"\1", text)
-
-    return text
-
-
-def safe_parse_json(text, run_id, context=""):
-    """Try to parse JSON, with repair as fallback."""
-
-    # first try: direct parse
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # second try: repair and parse
-    repaired = repair_json(text)
-    try:
-        result = json.loads(repaired)
-        log(run_id, f"{context} JSON required repair but parsed successfully")
-        return result
-    except (json.JSONDecodeError, ValueError) as e:
-        log(run_id, f"{context} JSON parse failed even after repair: {e}")
-        return None
-
-
-# ------------------------------------------------
-# LLM QUERY: FREE-FORM (for code generation)
-# uses /api/generate
-# ------------------------------------------------
-
-def query_ollama(model, prompt, url, run_id):
-
-    log(run_id, f"LLM request -> {model}")
-
-    try:
-
-        r = requests.post(
-            url,
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False
-            },
-            timeout=TIMEOUT_LLM_GENERATE
-        )
-
-        r.raise_for_status()
-        return r.json().get("response", "")
-
-    except requests.exceptions.Timeout:
-        log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_GENERATE}s)")
-        return ""
-
-    except requests.exceptions.ConnectionError as e:
-        log(run_id, f"LLM connection failed for {model}: {e}")
-        return ""
-
-    except requests.exceptions.HTTPError as e:
-        log(run_id, f"LLM HTTP error for {model}: {e}")
-        return ""
-
-    except json.JSONDecodeError as e:
-        log(run_id, f"LLM returned invalid JSON for {model}: {e}")
-        return ""
-
-
-# ------------------------------------------------
-# LLM QUERY: STRUCTURED (for planner/judge)
-# uses /api/chat with format parameter
-# ------------------------------------------------
-
-def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_id):
-    """
-    Query ollama using /api/chat with JSON schema enforcement.
-    Uses temperature=0 for deterministic output.
-    Returns parsed dict or None on failure.
-    """
-
-    log(run_id, f"LLM structured request -> {model}")
-
-    messages = []
-
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-
-    messages.append({"role": "user", "content": user_prompt})
-
-    try:
-
-        r = requests.post(
-            url,
-            json={
-                "model": model,
-                "messages": messages,
-                "format": schema,
-                "stream": False,
-                "options": {
-                    "temperature": 0
-                }
-            },
-            timeout=TIMEOUT_LLM_STRUCTURED
-        )
-
-        r.raise_for_status()
-
-        content = r.json().get("message", {}).get("content", "")
-
-        if not content:
-            log(run_id, f"structured query returned empty content from {model}")
-            return None
-
-        result = safe_parse_json(content, run_id, context=model)
-
-        return result
-
-    except requests.exceptions.Timeout:
-        log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_STRUCTURED}s)")
-        return None
-
-    except requests.exceptions.ConnectionError as e:
-        log(run_id, f"LLM connection failed for {model}: {e}")
-        return None
-
-    except requests.exceptions.HTTPError as e:
-        log(run_id, f"LLM HTTP error for {model}: {e}")
-        return None
-
-    except json.JSONDecodeError as e:
-        log(run_id, f"LLM returned invalid response envelope for {model}: {e}")
-        return None
-
-
-# ------------------------------------------------
-# CODE EXTRACTION
-# ------------------------------------------------
-
-def extract_code(text):
-    """Extract code from LLM output, stripping markdown fences and artifacts."""
-
-    cleaned = LLM_ARTIFACTS.sub("", text)
-
-    # try to find fenced code blocks (handle \n, \r\n, or no newline after fence)
-    blocks = re.findall(r"```(?:\w+)?\s*\n(.*?)```", cleaned, re.DOTALL)
-
-    if blocks:
-        best = max(blocks, key=len)
-        return best.strip()
-
-    # fallback: strip any remaining markdown fences as raw lines
-    lines = cleaned.strip().splitlines()
-
-    # remove leading fence line like ```python or ```
-    if lines and re.match(r"^```\w*\s*$", lines[0]):
-        lines = lines[1:]
-
-    # remove trailing fence line
-    if lines and re.match(r"^```\s*$", lines[-1]):
-        lines = lines[:-1]
-
-    return "\n".join(lines).strip()
-
-
-# ------------------------------------------------
-# MULTI-FILE EXTRACTION
-# ------------------------------------------------
-
-def extract_files(text, plan):
-
-    cleaned = LLM_ARTIFACTS.sub("", text)
-
-    markers = list(FILE_MARKER.finditer(cleaned))
-
-    if len(markers) >= 2:
-
-        files = {}
-
-        for i, match in enumerate(markers):
-            filename = match.group(1).strip()
-
-            if not SAFE_FILENAME.match(filename):
-                filename = re.sub(r"[^a-zA-Z0-9_\-\./]", "_", filename)
-
-            filename = filename.lstrip("/").replace("..", "")
-
-            start = match.end()
-            end = markers[i + 1].start() if i + 1 < len(markers) else len(cleaned)
-
-            content = cleaned[start:end].strip()
-
-            inner_blocks = re.findall(r"```(?:\w+)?\s*\n(.*?)```", content, re.DOTALL)
-            if inner_blocks:
-                content = max(inner_blocks, key=len).strip()
-
-            if content:
-                files[filename] = content
-
-        if files:
-            return files
-
-    code = extract_code(text)
-
-    if not code:
-        return {}
-
-    entrypoint = plan.get("entrypoint", "main.py")
-
-    if not entrypoint or not isinstance(entrypoint, str):
-        entrypoint = "main.py"
-
-    return {entrypoint: code}
-
-
-def format_files_for_prompt(files):
-
-    if len(files) == 1:
-        filename = list(files.keys())[0]
-        return f"# === FILE: {filename} ===\n{files[filename]}"
-
-    parts = []
-    for filename, content in files.items():
-        parts.append(f"# === FILE: {filename} ===\n{content}")
-
-    return "\n\n".join(parts)
 
 
 # ------------------------------------------------
