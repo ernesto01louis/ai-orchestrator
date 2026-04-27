@@ -1670,7 +1670,7 @@ def api_get_variants(role: str):
 @router.post("/dream")
 def api_run_dream():
     """Trigger a manual dream cycle (memory consolidation)."""
-    available = set(_url_cache.keys()) if _url_cache else None
+    available = set(_llm_ollama._url_cache.keys()) if _llm_ollama._url_cache else None
     report = run_dream(available_models=available, log_fn=log)
     return report
 

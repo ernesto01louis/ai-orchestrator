@@ -49,7 +49,7 @@ from core.paths import (
     IDENTITY_FILE, PRIMER_FILE, GOALS_FILE, SESSION_LOG,
     TARGET_IDENTITY_DIR,
 )
-from core.runtime import log
+from core.runtime import RUN_STATUS, log
 
 
 def load_prompt_index():

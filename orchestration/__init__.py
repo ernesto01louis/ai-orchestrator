@@ -39,6 +39,7 @@ from core.paths import (
     PROJECTS_DIR, LOG_DIR, MEMORY_DIR, REFERENCE_DIR,
     SANDBOX_DIR, SANDBOX_VENV,
     RUN_INDEX_FILE,
+    PROMPT_INDEX, EMBED_CACHE, NEGATIVE_MEMORY, MODEL_STATS,
 )
 from core.runtime import (
     RUN_STATUS, ORCHESTRATOR_PAUSED, log,
@@ -86,8 +87,11 @@ from memory_pkg import (
     vault_after_run,
 )
 from notifications import notify_run_complete, notify_run_started
-from references_pkg import load_reference_content
+from references_pkg import load_reference_content, MAX_REFERENCE_CONTENT_CHARS
 from tools import run_tools
+from gates import consolidate_lessons
+from dream import run_dream
+import llm.ollama as _llm_ollama  # for _url_cache access
 
 # Run counter for auto-dream trigger
 _run_counter_since_dream = 0
@@ -95,6 +99,54 @@ _run_counter_since_dream = 0
 # SAFE_FILENAME used by run_orchestration for filename safety on file outputs
 import re
 SAFE_FILENAME = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$")
+
+
+# ── Agent schemas (loaded at import time) ─────────
+# Originally lived in app.py via _load_agent_schema().
+def _load_agent_schema(role: str, fallback: dict) -> dict:
+    """Load schema.json from agents/<role>/, falling back to the embedded default."""
+    try:
+        cfg = load_agent(role)
+        schema = getattr(cfg, "schema", None)
+        return schema if schema else fallback
+    except Exception:  # noqa: BLE001
+        return fallback
+
+
+PLAN_SCHEMA = _load_agent_schema("planner", {
+    "type": "object",
+    "properties": {
+        "language": {"type": "string"},
+        "entrypoint": {"type": "string"},
+        "deps": {"type": "array", "items": {"type": "string"}},
+        "approach": {"type": "string"},
+        "files": {"type": "array", "items": {"type": "object"}},
+    },
+    "required": ["language", "entrypoint", "approach"],
+})
+
+JUDGE_SCHEMA = _load_agent_schema("judge", {
+    "type": "object",
+    "properties": {
+        "score": {"type": "integer"},
+        "reasoning": {"type": "string"},
+        "improvements": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["score", "reasoning"],
+})
+
+TOOL_DISPATCH_SCHEMA = _load_agent_schema("tool_dispatch", {
+    "type": "object",
+    "properties": {
+        "tools_to_run": {"type": "array", "items": {"type": "object"}},
+        "reasoning": {"type": "string"},
+    },
+    "required": ["tools_to_run"],
+})
+
+# Replace bare _url_cache references with module-qualified ones at runtime.
+# orchestration.refresh_models() calls _llm_ollama._refresh_url_cache() and reads _llm_ollama._url_cache.
+_url_cache = _llm_ollama._url_cache  # initial binding; refresh helpers update the dict in-place
 
 
 
@@ -1464,7 +1516,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             try:
                 log(run_id, "dream auto-trigger: consolidating memory")
                 # Get available models for pruning
-                available = set(_url_cache.keys()) if _url_cache else None
+                available = set(_llm_ollama._url_cache.keys()) if _llm_ollama._url_cache else None
                 dream_report = run_dream(available_models=available, log_fn=log)
                 health = dream_report.get("health", {})
                 log(run_id, f"dream: health={health.get('score', '?')}/100 ({health.get('rating', '?')})")

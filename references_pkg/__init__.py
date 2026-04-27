@@ -16,13 +16,25 @@ import json
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import requests
 
 from core.config import OLLAMA_MAIN_URL
 from core.paths import REFERENCE_DIR
-from llm.ollama import query_ollama_api
+from core.runtime import log
+from llm.ollama import (
+    query_ollama_api,
+    _refresh_url_cache,
+    _URL_CACHE_TTL,
+)
+import llm.ollama as _llm_ollama
+
+
+def _url_cache_state():
+    """Lazy accessor: keep references_pkg's URL cache view in sync with llm.ollama."""
+    return _llm_ollama._url_cache, _llm_ollama._url_cache_ts
 
 # text-native extensions — read as-is, no conversion needed
 TEXT_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".toml",
@@ -36,10 +48,12 @@ MAX_REFERENCE_CONTENT_CHARS = 120_000            # ~30k tokens, safe for most mo
 def _detect_vision_model():
     """Check if any vision-capable model is available on Ollama."""
     try:
-        if time.time() - _url_cache_ts > _URL_CACHE_TTL:
+        cache, cache_ts = _url_cache_state()
+        if time.time() - cache_ts > _URL_CACHE_TTL:
             _refresh_url_cache()
+            cache, _ = _url_cache_state()
         vision_keywords = ["llava", "minicpm-v", "bakllava", "moondream", "vision"]
-        for model_name, base_url in _url_cache.items():
+        for model_name, base_url in cache.items():
             if any(kw in model_name.lower() for kw in vision_keywords):
                 return model_name, base_url
     except Exception:

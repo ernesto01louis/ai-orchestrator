@@ -8,16 +8,24 @@ safety and recorded as a lesson on failure.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
+import subprocess
+import uuid
 from pathlib import Path
 
 from agents.loader import load_agent
 from core.config import OLLAMA_PLANNER_CHAT
 from core.runtime import log
-from execution import ssh_command, sudo_command
-from gates import check_gate, record_runtime_failure
+from execution import deploy_file, ssh_command, sudo_command
+from gates import check_gate, record_lesson, record_runtime_failure
 from llm.ollama import query_ollama_structured, resolve_chat_url
+
+# Loaded lazily to avoid circular import (orchestration owns the schemas)
+def _tool_dispatch_schema():
+    from orchestration import TOOL_DISPATCH_SCHEMA
+    return TOOL_DISPATCH_SCHEMA
 
 
 TOOL_REGISTRY_PATH = Path("/opt/ai-orchestrator/tool_registry.json")
@@ -172,7 +180,7 @@ def run_tools(prompt, plan, env, target, planner_model, run_id):
         planner_model,
         system_prompt,
         user_prompt,
-        TOOL_DISPATCH_SCHEMA,
+        _tool_dispatch_schema(),
         resolve_chat_url(planner_model),
         run_id
     )
