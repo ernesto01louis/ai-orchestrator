@@ -52,9 +52,14 @@ DREAM_LOG = Path(MEMORY_DIR) / "dream_log.json"
 # Tool registry
 TOOL_REGISTRY_PATH = "/opt/ai-orchestrator/tool_registry.json"
 
+# Campaigns (Phase 1.1) — durable state + YAML templates
+CAMPAIGNS_FILE = Path(MEMORY_DIR) / "campaigns.json"
+CAMPAIGN_TEMPLATES_DIR = REPO_ROOT / "campaigns"
+
 # Ensure runtime directories exist (idempotent)
 Path(PROJECTS_DIR).mkdir(parents=True, exist_ok=True)
 Path(LOG_DIR).mkdir(parents=True, exist_ok=True)
 Path(MEMORY_DIR).mkdir(parents=True, exist_ok=True)
 REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
 TARGET_IDENTITY_DIR.mkdir(parents=True, exist_ok=True)
+CAMPAIGN_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
