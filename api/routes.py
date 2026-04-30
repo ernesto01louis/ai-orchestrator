@@ -63,7 +63,9 @@ from core.runtime import (
     _ws_clients, _ws_lock, _ws_broadcast, _MAIN_LOOP, set_main_loop,
     _update_run_status, _init_run_status,
     _load_run_index, _persist_run_index,
+    CAMPAIGN_STATUS, _campaign_status_lock,
 )
+from core.campaign import CampaignCreate
 import dream
 from dream import run_dream, DREAM_LOG, _load_json as dream_load_json
 from execution import (
@@ -100,6 +102,7 @@ from memory_pkg import (
     load_embed_cache, save_embed_cache,
     load_negative_memory, save_negative_memory,
     load_model_stats, save_model_stats,
+    load_campaigns, save_campaigns,
     generate_embedding, cosine_similarity, find_similar,
     update_memory, update_negative_memory, find_negative_matches,
     update_model_stats, get_model_recommendation, build_memory_context,
@@ -1959,4 +1962,152 @@ def list_deployed_projects():
             })
 
     return {"projects": results}
+
+
+# ------------------------------------------------
+# API: CAMPAIGNS (Phase 1.1)
+# ------------------------------------------------
+
+def _campaign_or_404(campaign_id: str) -> dict:
+    campaigns = load_campaigns()
+    if campaign_id not in campaigns:
+        raise HTTPException(status_code=404, detail=f"Unknown campaign_id: {campaign_id}")
+    return campaigns[campaign_id]
+
+
+def _set_campaign_flag(campaign_id: str, flag: str, value: bool) -> None:
+    with _campaign_status_lock:
+        cs = CAMPAIGN_STATUS.setdefault(campaign_id, {})
+        cs[flag] = value
+
+
+@router.post("/campaigns")
+def create_campaign(req: CampaignCreate):
+    """Create a campaign and start its runner thread.
+
+    Mirrors /orchestrate: returns immediately with campaign_id; client
+    polls /campaigns/{id} or /campaigns/{id}/tree for progress.
+    """
+    if ORCHESTRATOR_PAUSED:
+        raise HTTPException(status_code=503, detail="Orchestrator is paused")
+
+    try:
+        validate_target(req.template.deploy_target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Lazy import to avoid circular at module load.
+    from orchestration.campaign import run_campaign, expand_grid
+
+    campaign_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    # Validate the grid is expandable up front so we can return run_count.
+    combos = expand_grid(req.params, max_runs=req.max_runs)
+
+    record = {
+        **req.model_dump(),
+        "id": campaign_id,
+        "status": "queued",
+        "runs": [],
+        "created_at": now,
+        "updated_at": now,
+        "completed_at": None,
+    }
+    campaigns = load_campaigns()
+    campaigns[campaign_id] = record
+    save_campaigns(campaigns)
+
+    with _campaign_status_lock:
+        CAMPAIGN_STATUS[campaign_id] = {
+            "phase": "queued", "paused": False, "aborted": False,
+            "current_run_id": None,
+        }
+
+    thread = threading.Thread(target=run_campaign, args=(campaign_id,), daemon=True)
+    thread.start()
+
+    return {
+        "campaign_id": campaign_id,
+        "run_count": len(combos),
+        "status": "started",
+        "poll": f"/campaigns/{campaign_id}",
+    }
+
+
+@router.get("/campaigns")
+def list_campaigns():
+    """List all campaigns with summary fields (id, name, status, run_count, mean_score)."""
+    campaigns = load_campaigns()
+    out = []
+    for cid, c in campaigns.items():
+        runs = c.get("runs", [])
+        scores = [r.get("score", 0) for r in runs if r.get("score") is not None]
+        mean = sum(scores) / len(scores) if scores else None
+        out.append({
+            "id": cid,
+            "name": c.get("name"),
+            "status": c.get("status"),
+            "run_count": len(runs),
+            "mean_score": mean,
+            "created_at": c.get("created_at"),
+            "updated_at": c.get("updated_at"),
+        })
+    return {"campaigns": out}
+
+
+@router.get("/campaigns/{campaign_id}")
+def get_campaign(campaign_id: str):
+    """Full campaign record."""
+    return _campaign_or_404(campaign_id)
+
+
+@router.get("/campaigns/{campaign_id}/tree")
+def get_campaign_tree(campaign_id: str):
+    """Tree view: campaign + per-run children with live phase merged in."""
+    campaign = _campaign_or_404(campaign_id)
+    runs_out = []
+    for r in campaign.get("runs", []):
+        rid = r["run_id"]
+        live = RUN_STATUS.get(rid)
+        if live:
+            phase = live.get("phase", r.get("status"))
+            score = live.get("score", r.get("score"))
+            completed = live.get("completed", False)
+        else:
+            phase = r.get("status")
+            score = r.get("score")
+            completed = r.get("status") in ("completed", "failed")
+        runs_out.append({
+            "run_id": rid,
+            "params": r.get("params", {}),
+            "phase": phase,
+            "score": score,
+            "completed": completed,
+        })
+    return {"campaign": campaign, "runs": runs_out}
+
+
+@router.post("/campaigns/{campaign_id}/pause")
+def pause_campaign(campaign_id: str):
+    _campaign_or_404(campaign_id)
+    _set_campaign_flag(campaign_id, "paused", True)
+    return {"campaign_id": campaign_id, "paused": True}
+
+
+@router.post("/campaigns/{campaign_id}/resume")
+def resume_campaign(campaign_id: str):
+    _campaign_or_404(campaign_id)
+    _set_campaign_flag(campaign_id, "paused", False)
+    return {"campaign_id": campaign_id, "paused": False}
+
+
+@router.post("/campaigns/{campaign_id}/abort")
+def abort_campaign(campaign_id: str):
+    """Best-effort abort: stops new runs from spawning. Does NOT interrupt
+    an in-flight orchestrator run — matches existing global-pause semantics.
+    """
+    _campaign_or_404(campaign_id)
+    _set_campaign_flag(campaign_id, "aborted", True)
+    return {"campaign_id": campaign_id, "aborted": True}
 
