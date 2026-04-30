@@ -29,6 +29,12 @@ RUN_STATUS: dict = {}
 _run_status_lock = threading.Lock()
 ORCHESTRATOR_PAUSED = False
 
+# Per-campaign live flags (Phase 1.1). Keyed by campaign_id; entries:
+#   {"phase": "queued"|"running"|"paused"|"completed"|"aborted"|"failed",
+#    "paused": bool, "aborted": bool, "current_run_id": str | None}
+CAMPAIGN_STATUS: dict = {}
+_campaign_status_lock = threading.Lock()
+
 _ws_clients: list = []
 _ws_lock = threading.Lock()
 _MAIN_LOOP: asyncio.AbstractEventLoop | None = None

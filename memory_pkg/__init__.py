@@ -47,7 +47,7 @@ from core.locks import locked_read_json, locked_write_json
 from core.paths import (
     PROMPT_INDEX, EMBED_CACHE, NEGATIVE_MEMORY, MODEL_STATS,
     IDENTITY_FILE, PRIMER_FILE, GOALS_FILE, SESSION_LOG,
-    TARGET_IDENTITY_DIR,
+    TARGET_IDENTITY_DIR, CAMPAIGNS_FILE,
 )
 from core.runtime import RUN_STATUS, log
 
@@ -75,6 +75,13 @@ def load_model_stats():
 
 def save_model_stats(data):
     locked_write_json(MODEL_STATS, data)
+
+def load_campaigns():
+    """Load campaigns map keyed by campaign_id (Phase 1.1)."""
+    return locked_read_json(CAMPAIGNS_FILE, {})
+
+def save_campaigns(data):
+    locked_write_json(CAMPAIGNS_FILE, data)
 
 
 # ------------------------------------------------
