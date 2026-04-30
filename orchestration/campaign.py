@@ -23,7 +23,7 @@ from core.runtime import (
     CAMPAIGN_STATUS, RUN_STATUS, _campaign_status_lock,
     _init_run_status, log,
 )
-from memory_pkg import load_campaigns, save_campaigns
+from memory_pkg import load_campaigns, save_campaigns, vault_write_campaign_note
 
 
 _PAUSE_POLL_SECONDS = 5.0
@@ -113,6 +113,7 @@ def run_campaign(campaign_id: str) -> None:
     campaigns[campaign_id]["status"] = "running"
     campaigns[campaign_id]["updated_at"] = _utcnow_iso()
     save_campaigns(campaigns)
+    _safe_vault_write(campaigns[campaign_id])
 
     template = campaigns[campaign_id]["template"]
     params_grid = campaigns[campaign_id].get("params", {})
@@ -174,11 +175,20 @@ def run_campaign(campaign_id: str) -> None:
         campaigns[campaign_id]["completed_at"] = _utcnow_iso()
         campaigns[campaign_id]["updated_at"] = _utcnow_iso()
         save_campaigns(campaigns)
+        _safe_vault_write(campaigns[campaign_id])
 
     _set_campaign_phase(campaign_id, final_status)
     with _campaign_status_lock:
         cs = CAMPAIGN_STATUS.setdefault(campaign_id, {})
         cs["current_run_id"] = None
+
+
+def _safe_vault_write(campaign: dict) -> None:
+    """Vault writes are best-effort and never raise into the runner."""
+    try:
+        vault_write_campaign_note(campaign)
+    except Exception:
+        pass
 
 
 def _record_run(
@@ -194,3 +204,4 @@ def _record_run(
     campaigns[campaign_id].setdefault("runs", []).append(entry)
     campaigns[campaign_id]["updated_at"] = _utcnow_iso()
     save_campaigns(campaigns)
+    _safe_vault_write(campaigns[campaign_id])

@@ -1344,9 +1344,12 @@ def vault_write_run_note(run_id, project_name, prompt, language, project_type,
 
     deps = plan.get("dependencies", [])
 
+    campaign_id = (RUN_STATUS.get(run_id) or {}).get("campaign_id")
+    campaign_line = f"campaign_id: {campaign_id}\n" if campaign_id else ""
+
     content = f"""---
 run_id: {run_id}
-project: {project_name}
+{campaign_line}project: {project_name}
 date: {date_str}
 score: {score}
 language: {language}
@@ -1426,6 +1429,103 @@ tags:
     vault_write_local("runs", filename, content)
     vault_sync_file("runs", filename, run_id)
 
+    return filename
+
+
+def vault_write_campaign_note(campaign):
+    """Write or update the campaign aggregator note (Phase 1.1).
+
+    Idempotent — overwrites the same file on each call so progress can be
+    re-emitted after every child run. Filename is stable across the
+    campaign's lifetime (date + safe_name + short_id).
+    """
+    if not VAULT_ENABLED:
+        return None
+
+    campaign_id = campaign.get("id", "")
+    if not campaign_id:
+        return None
+
+    name = campaign.get("name", "campaign")
+    safe_name = _vault_safe_name(name)
+    short_id = campaign_id[:8]
+    created = campaign.get("created_at", "")
+    date_str = (created.split("T")[0] if "T" in created
+                else datetime.utcnow().strftime("%Y-%m-%d"))
+    filename = f"{date_str}_{safe_name}_{short_id}.md"
+
+    runs = campaign.get("runs", [])
+    scores = [r.get("score", 0) for r in runs if r.get("score") is not None]
+    mean_score = sum(scores) / len(scores) if scores else 0
+    status = campaign.get("status", "queued")
+
+    front_matter = (
+        "---\n"
+        f"campaign_id: {campaign_id}\n"
+        f"name: {name}\n"
+        f"status: {status}\n"
+        f"run_count: {len(runs)}\n"
+        f"mean_score: {mean_score:.2f}\n"
+        f"created_at: {campaign.get('created_at', '')}\n"
+        f"updated_at: {campaign.get('updated_at', '')}\n"
+        f"completed_at: {campaign.get('completed_at') or ''}\n"
+        "tags:\n  - campaign\n"
+        f"  - {status}\n"
+        "---\n\n"
+    )
+
+    overview = f"# {name} — Campaign {short_id}\n\n"
+    if campaign.get("description"):
+        overview += f"{campaign['description']}\n\n"
+    overview += (
+        "| Field | Value |\n|-------|-------|\n"
+        f"| Status | **{status}** |\n"
+        f"| Runs | {len(runs)} |\n"
+        f"| Mean score | {mean_score:.2f} |\n"
+        f"| Created | {campaign.get('created_at', '')} |\n"
+        f"| Updated | {campaign.get('updated_at', '')} |\n"
+    )
+    if campaign.get("completed_at"):
+        overview += f"| Completed | {campaign['completed_at']} |\n"
+    overview += "\n"
+
+    params_section = "## Parameters\n\n"
+    grid = campaign.get("params", {}) or {}
+    if grid:
+        for k, v in grid.items():
+            params_section += f"- **{k}**: {v}\n"
+    else:
+        params_section += "_(no parameter sweep — single run)_\n"
+    params_section += "\n"
+    if campaign.get("max_runs") is not None:
+        params_section += f"_max_runs cap: {campaign['max_runs']}_\n\n"
+
+    runs_section = "## Runs\n\n"
+    if runs:
+        runs_section += "| # | Run | Params | Status | Score |\n"
+        runs_section += "|---|-----|--------|--------|-------|\n"
+        for i, r in enumerate(runs, 1):
+            rid = r.get("run_id", "")
+            short = rid[:8] if rid else ""
+            params_str = ", ".join(f"{k}={v}" for k, v in (r.get("params") or {}).items()) or "—"
+            score_str = f"{r.get('score', 0)}" if r.get("score") is not None else "—"
+            runs_section += f"| {i} | [[runs/{rid}|{short}]] | {params_str} | {r.get('status', '?')} | {score_str} |\n"
+    else:
+        runs_section += "_(no runs yet)_\n"
+    runs_section += "\n"
+
+    template = campaign.get("template", {}) or {}
+    template_section = "## Template\n\n"
+    template_section += f"- **Project**: `{template.get('project_name', '')}`\n"
+    template_section += f"- **Target**: `{template.get('deploy_target', '')}`\n"
+    template_section += f"- **Planner**: `{template.get('planner_model', '')}`\n"
+    template_section += f"- **Generators**: {', '.join(f'`{m}`' for m in template.get('generator_models', []))}\n"
+    template_section += f"- **Judge**: `{template.get('judge_model', '')}`\n\n"
+
+    content = front_matter + overview + params_section + template_section + runs_section
+
+    vault_write_local("campaigns", filename, content)
+    vault_sync_file("campaigns", filename, campaign_id)
     return filename
 
 
