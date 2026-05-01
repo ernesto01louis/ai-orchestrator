@@ -20,11 +20,13 @@ from datetime import datetime
 from typing import Any
 
 from core.runtime import (
-    CAMPAIGN_STATUS, RUN_STATUS, _campaign_status_lock,
-    _init_run_status, log,
+    CAMPAIGN_STATUS,
+    RUN_STATUS,
+    _campaign_status_lock,
+    _init_run_status,
+    log,
 )
 from memory_pkg import load_campaigns, save_campaigns, vault_write_campaign_note
-
 
 _PAUSE_POLL_SECONDS = 5.0
 
