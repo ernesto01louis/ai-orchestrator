@@ -1,17 +1,29 @@
 """Application configuration.
 
-Loads `/opt/ai-orchestrator/config.json` once at import time and exposes
-both the raw `CONFIG` dict and the most-used derived constants. Secrets
-should never live in config.json — use `.env` (loaded via python-dotenv).
+Loads ``config.json`` once at import time and exposes both the raw
+``CONFIG`` dict and the most-used derived constants. Secrets should
+never live in config.json — use ``.env`` (loaded via python-dotenv).
+
+Falls back to ``config.example.json`` when ``config.json`` is missing,
+so a fresh checkout (CI runner, new contributor) can boot without a
+manual copy step. The example file ships with placeholder targets and
+no secrets, so this is safe by construction.
 """
 from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from .paths import CONFIG_PATH
 
-with open(CONFIG_PATH) as _f:
+_config_path = Path(CONFIG_PATH)
+if not _config_path.exists():
+    _example_path = _config_path.with_name("config.example.json")
+    if _example_path.exists():
+        _config_path = _example_path
+
+with open(_config_path) as _f:
     CONFIG: dict = json.load(_f)
 
 # Ollama endpoints
