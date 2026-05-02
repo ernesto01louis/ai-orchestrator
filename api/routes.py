@@ -7,145 +7,145 @@ file is the immediate Phase 0 win.
 """
 from __future__ import annotations
 
-import asyncio
-import fcntl
 import json
-import math
 import os
 import re
 import shlex
-import subprocess
-import tempfile
 import threading
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 import requests
-
 from fastapi import (
-    APIRouter, HTTPException, WebSocket, WebSocketDisconnect,
-    UploadFile, File,
+    APIRouter,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
 )
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from agents.loader import load_agent, load_all_agents, reload_all as reload_agents, list_roles as list_agent_roles
+import llm.ollama as _llm_ollama
+from agents.loader import load_agent, load_all_agents
+from agents.loader import reload_all as reload_agents
+from core.campaign import CampaignCreate
 from core.config import (
-    CONFIG, OLLAMA_MAIN_URL, OLLAMA_JUDGE_URL, OLLAMA_PLANNER_URL,
-    OLLAMA_MAIN, OLLAMA_JUDGE, OLLAMA_MAIN_CHAT, OLLAMA_JUDGE_CHAT,
-    OLLAMA_PLANNER_CHAT, OLLAMA_PLANNER, OLLAMA_EMBED,
-    HINDSIGHT_URL, HINDSIGHT_BANK, HINDSIGHT_ENABLED, HINDSIGHT_TIMEOUT,
-    NOTIFY_CONFIG, NOTIFY_ENABLED, NOTIFY_SERVICE,
-    NTFY_URL, NTFY_TOPIC, NTFY_PRIORITY, NTFY_URLS,
-    GOTIFY_URL, GOTIFY_TOKEN, GOTIFY_PRIORITY, GOTIFY_URLS,
-    NOTIFY_ON_SUCCESS, NOTIFY_ON_FAILURE,
-    ORCHESTRATOR_URL, NOTIFY_STRATEGY,
-    VAULT_CONFIG, VAULT_ENABLED, VAULT_LOCAL_DIR,
-    VAULT_REMOTE_HOST, VAULT_REMOTE_USER, VAULT_REMOTE_KEY, VAULT_REMOTE_DIR,
-    VAULT_SYNC_ENABLED, VAULT_NAS_ENABLED, VAULT_NAS_PATH,
-    SSH_TARGETS, SSH_TIMEOUT, DEPLOY_BASE,
-    TARGET_SCORE, MAX_ITERATIONS, MAX_TROUBLESHOOT_ATTEMPTS,
-    JUDGE_FALLBACK_MODEL, DREAM_AUTO_INTERVAL,
+    DEPLOY_BASE,
+    GOTIFY_PRIORITY,
+    GOTIFY_TOKEN,
+    GOTIFY_URL,
+    HINDSIGHT_BANK,
+    HINDSIGHT_ENABLED,
+    HINDSIGHT_URL,
+    NOTIFY_ENABLED,
+    NOTIFY_ON_FAILURE,
+    NOTIFY_ON_SUCCESS,
+    NOTIFY_SERVICE,
+    NTFY_PRIORITY,
+    NTFY_TOPIC,
+    NTFY_URL,
+    OLLAMA_JUDGE_URL,
+    OLLAMA_MAIN_URL,
+    SSH_TARGETS,
+    VAULT_ENABLED,
+    VAULT_LOCAL_DIR,
+    VAULT_NAS_ENABLED,
+    VAULT_NAS_PATH,
+    VAULT_REMOTE_DIR,
+    VAULT_REMOTE_HOST,
+    VAULT_SYNC_ENABLED,
 )
-from core.locks import locked_read_json, locked_write_json
 from core.paths import (
     CONFIG_PATH,
-    PROJECTS_DIR, LOG_DIR, MEMORY_DIR, REFERENCE_DIR, TARGET_IDENTITY_DIR,
-    SANDBOX_DIR, SANDBOX_VENV,
-    RUN_INDEX_FILE, PROMPT_INDEX, EMBED_CACHE, NEGATIVE_MEMORY, MODEL_STATS,
-    SESSION_LOG, IDENTITY_FILE, PRIMER_FILE, GOALS_FILE,
-    TOOL_REGISTRY_PATH,
+    GOALS_FILE,
+    IDENTITY_FILE,
+    LOG_DIR,
+    NEGATIVE_MEMORY,
+    PROJECTS_DIR,
+    REFERENCE_DIR,
 )
 from core.runtime import (
-    RUN_STATUS, ORCHESTRATOR_PAUSED, log,
-    _ws_clients, _ws_lock, _ws_broadcast, _MAIN_LOOP, set_main_loop,
-    _update_run_status, _init_run_status,
-    _load_run_index, _persist_run_index,
-    CAMPAIGN_STATUS, _campaign_status_lock,
+    CAMPAIGN_STATUS,
+    ORCHESTRATOR_PAUSED,
+    RUN_STATUS,
+    _campaign_status_lock,
+    _init_run_status,
+    _load_run_index,
+    _ws_clients,
+    _ws_lock,
+    log,
 )
-from core.campaign import CampaignCreate
-import dream
-from dream import run_dream, DREAM_LOG, _load_json as dream_load_json
+from dream import DREAM_LOG, run_dream
+from dream import _load_json as dream_load_json
 from execution import (
-    ssh_command, deploy_file, deploy_project, persistent_deploy,
-    sudo_command, validate_target,
-    verify_local, verify_remote, verify_code, verify_files,
-    VERIFY_CONFIG, PYTHON_STDLIB, LANG_HANDLERS,
-    get_lang_handler, get_verifiable_extensions,
-    detect_python_deps, detect_node_deps, detect_bash_deps,
-    detect_all_dependencies, get_project_modules, sanitize_packages,
-    ensure_system_dependencies, SYSTEM_DEPS, SUDO_ALLOWED, SUDO_ENABLED,
-    sandbox_execute, sandbox_execute_server,
-    ensure_venv, install_dependencies,
-    check_port_available, find_available_port, patch_port_in_files,
-    environment_inspector, SAFE_PKG_PATTERN,
+    environment_inspector,
+    ssh_command,
+    validate_target,
 )
 from gates import (
-    init_gates, check_gate, record_lesson, record_runtime_failure,
-    consolidate_lessons, load_gates, save_gates, add_gate, remove_gate,
-    toggle_gate, get_gates_summary, get_lessons_summary, load_all_lessons,
-)
-from llm.ollama import (
-    query_ollama_api, query_ollama, query_ollama_structured,
-    resolve_chat_url, resolve_generate_url, _refresh_url_cache,
-)
-import llm.ollama as _llm_ollama
-from llm.repair import repair_json, safe_parse_json
-from llm.extract import (
-    extract_code, extract_files, format_files_for_prompt,
-    LLM_ARTIFACTS, FILE_MARKER,
+    add_gate,
+    consolidate_lessons,
+    get_gates_summary,
+    get_lessons_summary,
+    remove_gate,
+    toggle_gate,
 )
 from memory_pkg import (
-    load_prompt_index, save_prompt_index,
-    load_embed_cache, save_embed_cache,
-    load_negative_memory, save_negative_memory,
-    load_model_stats, save_model_stats,
-    load_campaigns, save_campaigns,
-    generate_embedding, cosine_similarity, find_similar,
-    update_memory, update_negative_memory, find_negative_matches,
-    update_model_stats, get_model_recommendation, build_memory_context,
-    load_identity, load_primer, rewrite_primer,
-    load_goals, update_goal_status,
-    load_session_log, save_session_log, record_session,
-    _create_default_target_identities, load_target_identity,
-    save_target_identity, auto_update_target_identity,
-    hindsight_request, hindsight_ensure_bank, hindsight_retain,
-    hindsight_recall, hindsight_reflect, hindsight_get_mental_models,
-    hindsight_retain_file, build_hindsight_retain_content,
-    format_hindsight_recall_for_planner, format_mental_models_for_planner,
-    _vault_ensure_dirs, _vault_safe_name, vault_write_local,
-    vault_sync_to_remote, vault_sync_file, vault_sync_to_nas,
-    vault_write_run_note, vault_write_project_note, vault_write_model_note,
-    vault_write_target_note, vault_write_error_note, _classify_error,
-    vault_write_daily_digest, vault_write_index, vault_after_run,
+    _vault_safe_name,
+    auto_update_target_identity,
+    find_negative_matches,
+    find_similar,
+    hindsight_get_mental_models,
+    hindsight_recall,
+    hindsight_reflect,
+    hindsight_request,
+    hindsight_retain,
+    load_campaigns,
+    load_goals,
+    load_identity,
+    load_model_stats,
+    load_negative_memory,
+    load_primer,
+    load_prompt_index,
+    load_session_log,
+    load_target_identity,
+    save_campaigns,
+    save_target_identity,
+    update_goal_status,
+    vault_sync_to_nas,
+    vault_sync_to_remote,
+    vault_write_daily_digest,
+    vault_write_index,
+    vault_write_model_note,
+    vault_write_project_note,
+    vault_write_target_note,
 )
 from notifications import (
-    send_notification, notify_run_complete, notify_run_started,
-    send_quick_actions_notification, send_api_cheatsheet_notification,
+    send_api_cheatsheet_notification,
+    send_notification,
+    send_quick_actions_notification,
 )
 from orchestration import (
     OrchestrateRequest,
-    get_loaded_models, get_available_models,
-    get_orchestrator_health, get_active_runs, get_recent_completed_runs,
-    get_deployed_project_count,
-    gather_live_context, format_live_context_for_planner,
-    build_briefing, build_full_planner_context,
-    planner_agent, judge_score, generate_candidate,
-    optimizer_agent, troubleshoot,
+    build_briefing,
+    format_live_context_for_planner,
+    gather_live_context,
+    get_active_runs,
+    get_available_models,
+    get_loaded_models,
+    get_orchestrator_health,
     run_orchestration,
 )
 from references_pkg import (
-    convert_pdf_to_markdown, _convert_pdf_basic, convert_file_to_markdown,
-    load_reference_content, _detect_vision_model, _describe_image_with_vision,
-    REFERENCE_DIR as _REFERENCE_DIR_FROM_PKG,  # already imported as REFERENCE_DIR via core.paths
-    TEXT_EXTENSIONS,
-    MAX_REFERENCE_UPLOAD_BYTES, MAX_REFERENCE_CONTENT_CHARS,
+    MAX_REFERENCE_UPLOAD_BYTES,
+    convert_file_to_markdown,
 )
 from tools import (
-    load_tool_registry, _save_tool_registry, _sanitize_tool_args,
-    execute_tool, run_tools, _TOOL_CMD_BLOCKLIST,
+    _save_tool_registry,
+    load_tool_registry,
 )
 
 # Filename safety regex (was at app.py:181 originally)
@@ -1844,7 +1844,7 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             # keep connection alive; client can send pings or filter commands
-            data = await ws.receive_text()
+            await ws.receive_text()
             # echo back as heartbeat acknowledgement
             await ws.send_text(json.dumps({"type": "pong"}))
     except WebSocketDisconnect:
@@ -1882,7 +1882,6 @@ def update_config(req: ConfigUpdate):
     Backs up current config before writing.
     Returns the saved config. Requires service restart to take effect.
     """
-    import copy
 
     # validate: must have required top-level keys
     required = {"ollama", "ssh_targets"}
@@ -1997,7 +1996,7 @@ def create_campaign(req: CampaignCreate):
         raise HTTPException(status_code=400, detail=str(e))
 
     # Lazy import to avoid circular at module load.
-    from orchestration.campaign import run_campaign, expand_grid
+    from orchestration.campaign import expand_grid, run_campaign
 
     campaign_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()

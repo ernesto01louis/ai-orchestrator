@@ -830,7 +830,7 @@ def hindsight_ensure_bank():
         if create_result:
             print(f"Hindsight bank '{HINDSIGHT_BANK}' created successfully")
         else:
-            print(f"Hindsight bank creation returned no response (may already exist)")
+            print("Hindsight bank creation returned no response (may already exist)")
 
     except (requests.exceptions.RequestException, OSError, ValueError) as e:
         print(f"Hindsight bank setup failed (non-fatal): {e}")
@@ -1055,7 +1055,7 @@ def build_hindsight_retain_content(run_id, project_name, prompt, language,
     )
 
     if success:
-        content += f"Code executed successfully (exit code 0). "
+        content += "Code executed successfully (exit code 0). "
         if deploy_path:
             content += f"Deployed to {deploy_path}. "
         if stdout_preview:
@@ -1597,7 +1597,7 @@ tags:
         model = r.get("winning_model", "?")
         rid = r.get("run_id", "?")[:8]
         prompt_preview = r.get("prompt", "?")[:60]
-        content += f"- `{ts}` score={s} {ok} [[models/{_vault_safe_name(model)}|{model}]] — {prompt_preview}\n"
+        content += f"- `{ts}` `{rid}` score={s} {ok} [[models/{_vault_safe_name(model)}|{model}]] — {prompt_preview}\n"
 
     if project_failures:
         content += "\n## Failures\n\n"
@@ -1691,11 +1691,7 @@ def vault_write_target_note(target_name, run_id="vault"):
     # load target identity
     identity = load_target_identity(target_name)
 
-    # gather runs on this target from memory
-    index = load_prompt_index()
-    target_runs = [e for e in index if e.get("project", "")]  # all runs go somewhere
-
-    # we don't track target in prompt_index currently, so we pull from RUN_STATUS
+    # we don't track target in prompt_index, so we pull from RUN_STATUS
     completed_on_target = []
     for rid, info in RUN_STATUS.items():
         if info.get("target") == target_name and info.get("completed"):

@@ -63,7 +63,6 @@ def _detect_vision_model():
 
 def _describe_image_with_vision(image_bytes, model, base_url, context=""):
     """Use a vision model to describe an image. Returns description string."""
-    import base64
     b64 = base64.b64encode(image_bytes).decode("utf-8")
 
     prompt = "Describe this image concisely. Focus on data, diagrams, charts, or technical content. "
@@ -156,7 +155,7 @@ def convert_pdf_to_markdown(pdf_path, run_id="convert"):
                     if description:
                         img_marker += f"\n> {description}"
                     else:
-                        img_marker += f"\n> *(visual content — no vision model available for description)*"
+                        img_marker += "\n> *(visual content — no vision model available for description)*"
                     img_marker += f"\n> *Saved: {img_path}*\n"
 
                     # append to end of markdown (images are supplementary)

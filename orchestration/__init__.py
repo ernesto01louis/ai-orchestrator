@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -97,7 +98,6 @@ import llm.ollama as _llm_ollama  # for _url_cache access
 _run_counter_since_dream = 0
 
 # SAFE_FILENAME used by run_orchestration for filename safety on file outputs
-import re
 SAFE_FILENAME = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$")
 
 

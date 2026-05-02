@@ -9,13 +9,13 @@ per-file constants below are Path objects.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 # REPO_ROOT derives from the location of this file, so a checkout works
 # from any path (CI runners, fresh clones, dev machines). Override via
 # AI_ORCHESTRATOR_ROOT env var if you need to pin to a specific deploy
 # path (e.g., the production LXC at /opt/ai-orchestrator).
 import os as _os
+from pathlib import Path
+
 REPO_ROOT = Path(
     _os.environ.get("AI_ORCHESTRATOR_ROOT")
     or Path(__file__).resolve().parent.parent
