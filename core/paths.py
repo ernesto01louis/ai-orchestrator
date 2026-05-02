@@ -9,18 +9,26 @@ per-file constants below are Path objects.
 """
 from __future__ import annotations
 
+# REPO_ROOT derives from the location of this file, so a checkout works
+# from any path (CI runners, fresh clones, dev machines). Override via
+# AI_ORCHESTRATOR_ROOT env var if you need to pin to a specific deploy
+# path (e.g., the production LXC at /opt/ai-orchestrator).
+import os as _os
 from pathlib import Path
 
-REPO_ROOT = Path("/opt/ai-orchestrator")
+REPO_ROOT = Path(
+    _os.environ.get("AI_ORCHESTRATOR_ROOT")
+    or Path(__file__).resolve().parent.parent
+)
 
 CONFIG_PATH = str(REPO_ROOT / "config.json")
 
-PROJECTS_DIR = "/opt/ai-orchestrator/projects"
-LOG_DIR = "/opt/ai-orchestrator/logs"
-MEMORY_DIR = "/opt/ai-orchestrator/memory"
+PROJECTS_DIR = str(REPO_ROOT / "projects")
+LOG_DIR = str(REPO_ROOT / "logs")
+MEMORY_DIR = str(REPO_ROOT / "memory")
 
 # Vault default location (overridable via config "vault.local_dir")
-VAULT_DIR_DEFAULT = "/opt/ai-orchestrator/vault"
+VAULT_DIR_DEFAULT = str(REPO_ROOT / "vault")
 
 # Sandbox (disposable, for in-process testing)
 SANDBOX_DIR = "/tmp/ai_sandbox"
@@ -39,18 +47,18 @@ GOALS_FILE = Path(MEMORY_DIR) / "goals.md"
 TARGET_IDENTITY_DIR = Path(MEMORY_DIR) / "targets"
 
 # References (PDFs, docs, code samples ingested into RAG)
-REFERENCE_DIR = Path("/opt/ai-orchestrator/references")
+REFERENCE_DIR = REPO_ROOT / "references"
 
 # Gates (safety) — historically lived at repo root
-GATES_FILE = "/opt/ai-orchestrator/gates.json"
-GATES_LOG = "/opt/ai-orchestrator/memory/gates_log.json"
-LESSONS_DIR = "/opt/ai-orchestrator/memory/lessons"
+GATES_FILE = str(REPO_ROOT / "gates.json")
+GATES_LOG = str(REPO_ROOT / "memory" / "gates_log.json")
+LESSONS_DIR = str(REPO_ROOT / "memory" / "lessons")
 
 # Dream (memory consolidation log)
 DREAM_LOG = Path(MEMORY_DIR) / "dream_log.json"
 
 # Tool registry
-TOOL_REGISTRY_PATH = "/opt/ai-orchestrator/tool_registry.json"
+TOOL_REGISTRY_PATH = str(REPO_ROOT / "tool_registry.json")
 
 # Campaigns (Phase 1.1) — durable state + YAML templates
 CAMPAIGNS_FILE = Path(MEMORY_DIR) / "campaigns.json"

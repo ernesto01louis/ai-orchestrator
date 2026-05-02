@@ -19,7 +19,7 @@ import yaml
 AGENTS_DIR = os.path.join(os.path.dirname(__file__))
 
 # Cache: role -> loaded AgentConfig
-_cache = {}
+_cache: dict[str, "AgentConfig"] = {}
 
 
 class AgentConfig:

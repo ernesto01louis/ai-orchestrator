@@ -21,7 +21,7 @@ from pathlib import Path
 
 
 try:
-    from core.paths import MEMORY_DIR, DREAM_LOG, VAULT_DIR_DEFAULT as VAULT_DIR  # type: ignore
+    from core.paths import MEMORY_DIR, DREAM_LOG, VAULT_DIR_DEFAULT as VAULT_DIR
 except ImportError:  # standalone use without core/ on path
     MEMORY_DIR = "/opt/ai-orchestrator/memory"
     VAULT_DIR = "/opt/ai-orchestrator/vault"

@@ -23,7 +23,6 @@ from pathlib import Path
 
 from .paths import LOG_DIR, RUN_INDEX_FILE
 
-
 # ── live process state ─────────────────────────────
 RUN_STATUS: dict = {}
 _run_status_lock = threading.Lock()

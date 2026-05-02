@@ -27,7 +27,7 @@ from pathlib import Path
 
 
 try:
-    from core.paths import GATES_FILE, LESSONS_DIR, GATES_LOG  # type: ignore
+    from core.paths import GATES_FILE, LESSONS_DIR, GATES_LOG
 except ImportError:  # standalone use without core/ on path
     GATES_FILE = "/opt/ai-orchestrator/gates.json"
     LESSONS_DIR = "/opt/ai-orchestrator/memory/lessons"

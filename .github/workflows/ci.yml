@@ -10,9 +10,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -21,28 +21,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-mock httpx ruff mypy
+          pip install pytest pytest-asyncio pytest-mock httpx ruff mypy types-requests types-PyYAML
 
-      # Lint and type-check are currently advisory — Phase 0 left a backlog
-      # of unused imports from the surgical extraction; tightening tracked
-      # in ROADMAP.md follow-up. Tests are the gating signal.
       - name: Lint (ruff)
-        run: ruff check core llm notifications tools execution memory_pkg orchestration api references_pkg || echo "ruff non-blocking in Phase 0"
+        run: ruff check core llm notifications tools execution memory_pkg orchestration api references_pkg
 
+      # mypy stays advisory: only the freshly-extracted modules are
+      # strict-checked, and the broader codebase still has untyped corners.
       - name: Type-check (mypy)
         run: mypy core llm notifications tools execution || echo "mypy non-blocking in Phase 0"
 
-      - name: Symlink workspace to /opt/ai-orchestrator (hardcoded REPO_ROOT)
-        run: sudo mkdir -p /opt && sudo ln -sfn "$GITHUB_WORKSPACE" /opt/ai-orchestrator
-
-      - name: Seed local config from example (config.json is gitignored)
-        run: cp config.example.json config.json
-
       - name: Run in-process tests (no live orchestrator on CI)
         run: pytest tests/test_inprocess.py tests/test_campaigns.py -q
-        env:
-          # the live HTTP smoke tests skip themselves when /health is unreachable
-          ORCHESTRATOR_URL: http://127.0.0.1:8000
 
       - name: Show test summary
         if: always()
