@@ -45,6 +45,22 @@ def _live_or_skip(http: httpx.Client) -> None:
         pytest.skip(f"orchestrator unreachable at {http.base_url}: {exc}")
 
 
+@pytest.fixture(scope="session")
+def inprocess_client():
+    """Session-scoped Starlette TestClient against the FastAPI app.
+
+    Must be a singleton: the MCP sub-app's StreamableHTTPSessionManager
+    refuses to run its lifespan more than once per process, so multiple
+    TestClient instances would crash with RuntimeError on the second one.
+    """
+    import app  # noqa: WPS433
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(app.app) as c:
+        yield c
+
+
 @pytest.fixture
 def live(http: httpx.Client) -> httpx.Client:
     """Use this for any test that requires the live orchestrator."""

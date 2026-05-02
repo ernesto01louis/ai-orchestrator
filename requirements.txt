@@ -9,10 +9,6 @@ cachetools==6.2.6
 certifi==2026.1.4
 cffi==2.0.0
 charset-normalizer==3.4.4
-cli-anything-blender==1.0.0
-cli-anything-comfyui==1.0.0
-cli-anything-hub==0.1.0
-cli-anything-ollama==1.0.1
 click==8.3.1
 cryptography==46.0.5
 deprecation==2.1.0

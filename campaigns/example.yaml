@@ -1,0 +1,50 @@
+# Example campaign template (Phase 1.1).
+#
+# A campaign expands a parameter grid into N orchestrator runs. This
+# example sweeps a single 'difficulty' parameter; substitute {difficulty}
+# in any string field of the template (project_name, prompt, ...) and it
+# is filled per-combo at expansion time.
+#
+# Use this file as a starting point for new campaigns. Phase 1.1 accepts
+# campaign definitions as JSON via POST /campaigns; YAML hot-reload
+# loader lands in a follow-up. To create a campaign from this file today:
+#
+#   python -c "import yaml,json; print(json.dumps(yaml.safe_load(open('campaigns/example.yaml'))))" \
+#     | curl -s -X POST http://127.0.0.1:8000/campaigns \
+#         -H 'content-type: application/json' -d @-
+
+name: example-difficulty-sweep
+description: |
+  Generic demonstration campaign. Asks the orchestrator to solve a small
+  arithmetic word problem at three difficulty levels. Domain-neutral on
+  purpose — replace prompt and target with whatever you actually want
+  to vary.
+
+template:
+  project_name: "example_sweep_{difficulty}"
+  prompt: |
+    Write a Python function that solves the following problem at
+    difficulty level "{difficulty}". Include a small test that runs
+    on import and prints PASS or FAIL.
+
+    Problem: given a list of integers, return the sum of the unique values.
+
+  planner_model: qwen2.5:72b
+  generator_models:
+    - qwen2.5-coder:32b
+  judge_model: qwen2.5:72b
+  deploy_target: pi-1
+  max_iterations: 2
+
+params:
+  difficulty:
+    - easy
+    - medium
+    - hard
+
+# Optional: cap how many of the expanded combos actually run.
+# Omit (or leave null) to run the full grid.
+max_runs: null
+
+# Reserved for Phase 1.3 (Prefect). Phase 1.1 ignores values > 1.
+parallelism: 1

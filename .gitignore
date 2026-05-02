@@ -26,6 +26,7 @@ memory/negative_memory.json
 memory/session_log.json
 memory/model_stats.json
 memory/dream_log.json
+memory/campaigns.json
 memory/lessons/
 memory/targets/
 memory/primer.md

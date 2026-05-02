@@ -75,14 +75,14 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 
 ## Phase 1 — Research-platform capabilities (~8 weeks)
 
-### 1.1 Campaign abstraction
-- [ ] Pydantic `Campaign` model in `core/campaign.py`
-- [ ] `campaigns/` directory with YAML templates
-- [ ] `POST /campaigns`, `GET /campaigns`, `GET /campaigns/{id}/tree`
-- [ ] `POST /campaigns/{id}/{pause,resume,abort}`
-- [ ] Campaign runner in `orchestration/campaign.py`
-- [ ] Vault writes campaign note + subnotes per run
-- [ ] Tests: lifecycle, pause/resume, abort, evidence emission
+### 1.1 Campaign abstraction — DONE
+- [x] Pydantic `Campaign` model in `core/campaign.py`
+- [x] `campaigns/` directory with YAML templates (`campaigns/example.yaml`)
+- [x] `POST /campaigns`, `GET /campaigns`, `GET /campaigns/{id}/tree`
+- [x] `POST /campaigns/{id}/{pause,resume,abort}`
+- [x] Campaign runner in `orchestration/campaign.py`
+- [x] Vault writes campaign note + subnotes per run
+- [x] Tests: lifecycle, pause/resume, abort, evidence emission (11 new tests, 37 total green)
 
 ### 1.2 Evidence bundle schema
 - [ ] Pydantic `EvidenceBundle` in `core/evidence.py`
