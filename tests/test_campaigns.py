@@ -91,13 +91,20 @@ def cleanup_campaigns():
     save_campaigns(campaigns)
 
 
+def _first_target() -> str:
+    """First configured SSH target — works against both the local LXC
+    (real targets) and CI (config.example.json has 'example-target')."""
+    from core.config import SSH_TARGETS
+    return next(iter(SSH_TARGETS.keys()))
+
+
 _MIN_TEMPLATE = {
     "project_name": "test_campaign_smoke",
     "prompt": "noop",
     "planner_model": "qwen2.5-coder:32b",
     "generator_models": ["qwen2.5-coder:32b"],
     "judge_model": "qwen2.5-coder:32b",
-    "deploy_target": "pi-1",
+    "deploy_target": _first_target(),
 }
 
 
