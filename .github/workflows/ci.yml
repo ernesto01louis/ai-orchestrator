@@ -32,6 +32,9 @@ jobs:
       - name: Type-check (mypy)
         run: mypy core llm notifications tools execution || echo "mypy non-blocking in Phase 0"
 
+      - name: Symlink workspace to /opt/ai-orchestrator (hardcoded REPO_ROOT)
+        run: sudo mkdir -p /opt && sudo ln -sfn "$GITHUB_WORKSPACE" /opt/ai-orchestrator
+
       - name: Seed local config from example (config.json is gitignored)
         run: cp config.example.json config.json
 
