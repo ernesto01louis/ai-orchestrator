@@ -84,12 +84,33 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 - [x] Vault writes campaign note + subnotes per run
 - [x] Tests: lifecycle, pause/resume, abort, evidence emission (11 new tests, 37 total green)
 
-### 1.2 Evidence bundle schema
-- [ ] Pydantic `EvidenceBundle` in `core/evidence.py`
-- [ ] Pluggable evidence calculators
-- [ ] Bundle written to `campaigns/{id}/evidence.json`
-- [ ] Signed manifest at `campaigns/{id}/manifest.json`
-- [ ] Optional GPG signing
+### 1.2 Evidence bundle schema — DONE (citation-grade)
+- [x] Pydantic `EvidenceBundle` in `core/evidence.py` — wire-compatible
+      with **RO-Crate 1.2** + **WRROC** profile, **in-toto Statement v1**,
+      **SLSA Provenance v1.0**, **DSSE** envelope
+- [x] Pluggable evidence calculators (pluggy + entry points; 5 builtins:
+      stats, lineage, compute, code_fingerprint, hardware_fingerprint)
+- [x] Bundle written to `campaigns/{id}/evidence.json` + RO-Crate at
+      `campaigns/{id}/ro-crate-metadata.json`
+- [x] Signed manifest at `campaigns/{id}/manifest.json` plus DSSE-wrapped
+      `manifest.json.dsse` (Ed25519 via PyNaCl, single host-wide key)
+- [x] **REFORMS** (Kapoor et al., *Sci Adv* 2024) + **NeurIPS Q4-Q8**
+      checklists — half auto-filled, half user-fillable Markdown stubs
+- [x] **Model Cards** (Mitchell et al. 2019) per LLM target;
+      **Datasheets for Datasets** (Gebru et al. 2018) per data input
+- [x] `hypothesis` field is now REQUIRED at campaign creation
+      (REFORMS §1 pre-registration)
+- [x] 4 REST routes: `GET .../evidence`, `.crate.zip`, `.../verify`,
+      `POST .../refresh`
+- [x] Standalone Python verifier (`python -m evidence.verify
+      --crate-dir`) — pure stdlib + PyNaCl, no orchestrator runtime needed
+- [x] 32 new tests (schema, rocrate, signing, calculators, e2e); 71/71 green
+- [ ] *Deferred to 1.2.1*: HTML viewer (Snakemake-style single-page)
+- [ ] *Deferred to 1.2.x*: per-LLM-call telemetry capture (rendered messages,
+      sampling, response_tokens populated per call); schema already accepts
+      it, the orchestration loop just doesn't capture at that grain yet
+- [ ] *Deferred to Phase 2*: self-hosted Sigstore (Fulcio + Rekor) —
+      DSSE envelope abstracts trust root, older bundles stay verifiable
 
 ### 1.3 Prefect 3.x integration
 - [ ] Install Prefect in a new LXC
