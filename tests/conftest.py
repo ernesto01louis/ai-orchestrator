@@ -53,9 +53,9 @@ def inprocess_client():
     refuses to run its lifespan more than once per process, so multiple
     TestClient instances would crash with RuntimeError on the second one.
     """
-    import app  # noqa: WPS433
-
     from fastapi.testclient import TestClient
+
+    import app  # noqa: WPS433
 
     with TestClient(app.app) as c:
         yield c
