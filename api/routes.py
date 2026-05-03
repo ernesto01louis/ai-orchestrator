@@ -2110,3 +2110,161 @@ def abort_campaign(campaign_id: str):
     _set_campaign_flag(campaign_id, "aborted", True)
     return {"campaign_id": campaign_id, "aborted": True}
 
+
+# ------------------------------------------------
+# API: EVIDENCE BUNDLES (Phase 1.2)
+# ------------------------------------------------
+
+
+def _crate_dir(campaign_id: str) -> Path:
+    """Filesystem location of the campaign's evidence crate."""
+    from evidence.builder import CAMPAIGNS_OUTPUT_DIR
+
+    return CAMPAIGNS_OUTPUT_DIR / campaign_id
+
+
+def _crate_or_404(campaign_id: str) -> Path:
+    _campaign_or_404(campaign_id)
+    crate = _crate_dir(campaign_id)
+    if not (crate / "evidence.json").exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No evidence bundle for campaign {campaign_id} yet. "
+                "Bundles are emitted after each run; trigger a refresh "
+                "with POST /campaigns/{id}/evidence/refresh if needed."
+            ),
+        )
+    return crate
+
+
+@router.get("/campaigns/{campaign_id}/evidence")
+def get_evidence(campaign_id: str):
+    """Return the EvidenceBundle JSON for a campaign."""
+    crate = _crate_or_404(campaign_id)
+    return json.loads((crate / "evidence.json").read_text())
+
+
+@router.get("/campaigns/{campaign_id}/evidence.crate.zip")
+def get_evidence_crate_zip(campaign_id: str):
+    """Stream the entire RO-Crate directory as a zip.
+
+    Suitable for ``curl -O`` + ``unzip`` — the unzipped tree is a
+    standalone bundle that the standalone verifier can run against.
+    """
+    import io
+    import zipfile
+
+    from fastapi.responses import Response
+
+    crate = _crate_or_404(campaign_id)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(crate.rglob("*")):
+            if path.is_file():
+                zf.write(path, arcname=str(path.relative_to(crate)))
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="campaign-{campaign_id[:8]}.crate.zip"'
+            ),
+        },
+    )
+
+
+@router.get("/campaigns/{campaign_id}/evidence/verify")
+def verify_evidence(campaign_id: str):
+    """Recompute artifact digests + verify the DSSE envelope signature.
+
+    Pure verification path: no signing-key access needed, only the
+    public key embedded in the crate. Returns ``{valid, errors}``.
+    """
+    import base64
+
+    from core.evidence import DsseEnvelope, EvidenceBundle, InTotoStatement
+    from evidence.signing import sha256_file, verify_envelope
+
+    crate = _crate_or_404(campaign_id)
+    errors: list[str] = []
+
+    manifest_path = crate / "manifest.json"
+    dsse_path = crate / "manifest.json.dsse"
+    public_key_path = crate / "public.key"
+    evidence_path = crate / "evidence.json"
+
+    for required in (manifest_path, dsse_path, public_key_path, evidence_path):
+        if not required.exists():
+            errors.append(f"missing: {required.name}")
+
+    if errors:
+        return {"valid": False, "errors": errors}
+
+    statement = InTotoStatement.model_validate_json(manifest_path.read_text())
+    for subj in statement.subject:
+        target = crate / subj.name
+        if not target.exists():
+            errors.append(f"manifest references missing file: {subj.name}")
+            continue
+        actual = sha256_file(target)
+        expected = subj.digest["sha256"]
+        if actual != expected:
+            errors.append(
+                f"sha256 mismatch on {subj.name}: "
+                f"expected {expected[:12]}…, got {actual[:12]}…"
+            )
+
+    envelope = DsseEnvelope.model_validate_json(dsse_path.read_text())
+    public_key = base64.b64decode(public_key_path.read_text().strip())
+    if not verify_envelope(envelope, public_key):
+        errors.append("DSSE envelope signature did not verify")
+
+    try:
+        EvidenceBundle.model_validate_json(evidence_path.read_text())
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"evidence.json failed schema validation: {exc}")
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "subject_count": len(statement.subject),
+        "keyid": envelope.signatures[0].keyid if envelope.signatures else None,
+    }
+
+
+@router.post("/campaigns/{campaign_id}/evidence/refresh")
+def refresh_evidence(campaign_id: str):
+    """Force a rebuild of the evidence bundle for a campaign.
+
+    Useful after a calculator plugin lands or a run completes outside
+    the normal post-run hook (e.g., rebuilding historical campaigns).
+    Requires the signing key on disk; in-memory keys are test-only.
+    """
+    _campaign_or_404(campaign_id)
+
+    try:
+        from evidence.builder import build_bundle
+
+        bundle = build_bundle(campaign_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Signing key unavailable: {exc}. Run "
+                "scripts/install_signing_key.sh on the orchestrator host."
+            ),
+        ) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"build_bundle failed: {exc}") from exc
+
+    return {
+        "campaign_id": campaign_id,
+        "bundle_id": bundle.bundle_id,
+        "artifact_count": len(bundle.artifacts),
+        "calculator_count": len(bundle.calculators),
+    }
+
