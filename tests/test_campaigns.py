@@ -109,7 +109,7 @@ _MIN_TEMPLATE = {
 
 
 def test_campaigns_create_and_list(client, cleanup_campaigns):
-    body = {"name": "smoke-create", "template": _MIN_TEMPLATE, "params": {"seed": [1, 2]}}
+    body = {"name": "smoke-create", "hypothesis": "h", "template": _MIN_TEMPLATE, "params": {"seed": [1, 2]}}
     r = client.post("/campaigns", json=body)
     assert r.status_code == 200, r.text
     cid = r.json()["campaign_id"]
@@ -124,7 +124,7 @@ def test_campaigns_create_and_list(client, cleanup_campaigns):
 
 
 def test_campaigns_get_returns_full_record(client, cleanup_campaigns):
-    body = {"name": "smoke-get", "template": _MIN_TEMPLATE, "params": {}}
+    body = {"name": "smoke-get", "hypothesis": "h", "template": _MIN_TEMPLATE, "params": {}}
     cid = client.post("/campaigns", json=body).json()["campaign_id"]
     cleanup_campaigns.append(cid)
 
@@ -141,8 +141,26 @@ def test_campaigns_404_on_unknown(client):
     assert r.status_code == 404
 
 
+def test_campaigns_reject_missing_hypothesis(client):
+    """REFORMS §1 pre-registration: campaigns without a hypothesis are 422."""
+    body = {"name": "no-hypothesis", "template": _MIN_TEMPLATE, "params": {}}
+    r = client.post("/campaigns", json=body)
+    assert r.status_code == 422
+    assert "hypothesis" in r.text.lower()
+
+
+def test_campaigns_reject_blank_hypothesis(client):
+    body = {
+        "name": "blank-hypothesis", "hypothesis": "   ",
+        "template": _MIN_TEMPLATE, "params": {},
+    }
+    r = client.post("/campaigns", json=body)
+    assert r.status_code == 422
+    assert "hypothesis" in r.text.lower()
+
+
 def test_campaigns_pause_resume(client, cleanup_campaigns):
-    body = {"name": "smoke-pause", "template": _MIN_TEMPLATE, "params": {"seed": [1]}}
+    body = {"name": "smoke-pause", "hypothesis": "h", "template": _MIN_TEMPLATE, "params": {"seed": [1]}}
     cid = client.post("/campaigns", json=body).json()["campaign_id"]
     cleanup_campaigns.append(cid)
 
@@ -161,7 +179,7 @@ def test_campaigns_pause_resume(client, cleanup_campaigns):
 
 
 def test_campaigns_abort(client, cleanup_campaigns):
-    body = {"name": "smoke-abort", "template": _MIN_TEMPLATE, "params": {"seed": [1]}}
+    body = {"name": "smoke-abort", "hypothesis": "h", "template": _MIN_TEMPLATE, "params": {"seed": [1]}}
     cid = client.post("/campaigns", json=body).json()["campaign_id"]
     cleanup_campaigns.append(cid)
 
@@ -175,7 +193,7 @@ def test_campaigns_abort(client, cleanup_campaigns):
 
 
 def test_campaigns_tree_shape(client, cleanup_campaigns):
-    body = {"name": "smoke-tree", "template": _MIN_TEMPLATE, "params": {"seed": [1, 2]}}
+    body = {"name": "smoke-tree", "hypothesis": "h", "template": _MIN_TEMPLATE, "params": {"seed": [1, 2]}}
     cid = client.post("/campaigns", json=body).json()["campaign_id"]
     cleanup_campaigns.append(cid)
 
