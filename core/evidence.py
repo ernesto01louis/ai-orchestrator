@@ -32,7 +32,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ── DSSE envelope (Dead Simple Signing Envelope) ──────
 
@@ -72,8 +72,13 @@ class Subject(BaseModel):
 
 
 class SlsaBuilder(BaseModel):
-    """Identifies the builder (here: the orchestrator) that ran the build."""
-    id: AnyUrl
+    """Identifies the builder (here: the orchestrator) that ran the build.
+
+    SLSA types ``builder.id`` as a URI; we use plain str so SLSA-style
+    pseudo-URIs like ``https://ai-orchestrator.io/builder/v0.1`` round-trip
+    losslessly without Pydantic re-serialising them as AnyUrl objects.
+    """
+    id: str
     version: dict[str, str]  # {"ai-orchestrator": "0.2.0", "ollama": "0.5.x", ...}
 
 
@@ -91,8 +96,13 @@ class SlsaBuildDefinition(BaseModel):
     sampling). `internalParameters` are orchestrator-internal details
     (URL routing, gates state) that affect the build but aren't part
     of the user-facing definition.
+
+    Note: SLSA spec types ``buildType`` and ``predicateType`` as URI
+    strings, not full URLs — Pydantic's AnyUrl validation would also
+    require a scheme + host pair which doesn't add value over the
+    constant default. Plain str.
     """
-    buildType: AnyUrl = Field(default="https://ai-orchestrator.io/campaign/v1")
+    buildType: str = "https://ai-orchestrator.io/campaign/v1"
     externalParameters: dict
     internalParameters: dict
     resolvedDependencies: list[Subject]
@@ -120,7 +130,7 @@ class InTotoStatement(BaseModel):
         default="https://in-toto.io/Statement/v1", alias="_type"
     )
     subject: list[Subject]
-    predicateType: AnyUrl = Field(default="https://slsa.dev/provenance/v1")
+    predicateType: str = "https://slsa.dev/provenance/v1"
     predicate: SlsaProvenance
 
     model_config = ConfigDict(populate_by_name=True)
