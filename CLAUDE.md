@@ -45,11 +45,24 @@ memory_pkg/__init__.py    ~1970 lines    All five memory layers (positive/negati
 orchestration/__init__.py ~1500 lines    run_orchestration loop, planner/judge/generator/
                                          optimizer/troubleshooter agent functions, context
                                          builders, OrchestrateRequest model, agent schemas
-api/routes.py             ~1900 lines    All 82 routes + WebSocket on a single APIRouter
+api/routes.py             ~2000 lines    All routes + WebSocket on a single APIRouter
+                                         (campaign + evidence routes appended)
+evidence/                                Phase 1.2 citation-grade evidence bundle:
+  hookspecs.py / __init__.py             pluggy plugin host
+  builtin/{stats,lineage,compute,        5 builtin calculators
+    code_fingerprint,hardware}.py
+  rocrate.py                             RO-Crate 1.2 / WRROC emitter (round-trips)
+  signing.py                             DSSE envelope + Ed25519 (PyNaCl)
+  checklists.py                          REFORMS + NeurIPS auto-fill, Model Cards,
+                                         Datasheets-for-Datasets
+  builder.py                             build_bundle(campaign_id) pipeline
+  verify.py                              standalone verifier CLI
 agents/                                  Per-role configs + agents/loader.py
 dream.py, gates.py,                      Already extracted, kept at root for compat
 mcp_server.py
-tests/                                   pytest scaffold (26 tests)
+campaigns/                               YAML templates + per-campaign evidence crates
+scripts/install_signing_key.sh           one-shot Ed25519 key setup
+tests/                                   pytest scaffold (71 tests)
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data-flow diagram.
@@ -132,10 +145,13 @@ See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase task list.
 Tests, secrets in `.env`, `_ws_broadcast` cross-thread fix, dead stub
 removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
 
-### Phase 1 — research-platform capabilities (next)
+### Phase 1 — research-platform capabilities
 
-1.1 Campaign abstraction (generic, domain-agnostic)
-1.2 Evidence bundle schema
+1.1 Campaign abstraction (generic, domain-agnostic) — DONE (v0.1.1-phase1.1)
+1.2 Evidence bundle schema — DONE (v0.1.2-phase1.2): citation-grade
+    RO-Crate 1.2 / WRROC bundles with in-toto + SLSA + DSSE attestation,
+    REFORMS + NeurIPS checklists, Model Cards, Datasheets, pluggable
+    calculators, Ed25519 signing
 1.3 Prefect 3.x as workflow engine
 1.4 DVC on TrueNAS for data versioning
 1.5 SHA256 artifact manifests

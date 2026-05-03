@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 CampaignStatus = Literal[
     "queued", "running", "paused", "completed", "aborted", "failed"
@@ -39,12 +39,31 @@ class CampaignTemplate(BaseModel):
 
 
 class CampaignCreate(BaseModel):
+    """Public POST body for creating a campaign.
+
+    ``hypothesis`` is REQUIRED and load-bearing for the Phase 1.2
+    evidence bundle: it satisfies REFORMS §1 pre-registration and
+    is the field that lets the bundle honestly answer "what did this
+    campaign conclude". Empty/whitespace-only values are rejected.
+    """
+
     name: str
     description: str | None = None
+    hypothesis: str
     template: CampaignTemplate
     params: dict[str, list]
     max_runs: int | None = None
     parallelism: int = 1
+
+    @field_validator("hypothesis")
+    @classmethod
+    def _hypothesis_not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError(
+                "hypothesis required (REFORMS §1 pre-registration); "
+                "give the question this campaign sets out to answer"
+            )
+        return v.strip()
 
 
 class CampaignRun(BaseModel):

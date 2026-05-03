@@ -27,6 +27,10 @@ memory/session_log.json
 memory/model_stats.json
 memory/dream_log.json
 memory/campaigns.json
+# Per-campaign evidence crates (Phase 1.2). Tracked YAML templates at
+# campaigns/ root (e.g., example.yaml) stay versioned; the per-campaign
+# subdirectories campaigns/<id>/ are runtime output.
+campaigns/*/
 memory/lessons/
 memory/targets/
 memory/primer.md

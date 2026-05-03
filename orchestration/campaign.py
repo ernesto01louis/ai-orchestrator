@@ -178,6 +178,7 @@ def run_campaign(campaign_id: str) -> None:
         campaigns[campaign_id]["updated_at"] = _utcnow_iso()
         save_campaigns(campaigns)
         _safe_vault_write(campaigns[campaign_id])
+        _safe_emit_evidence(campaign_id)
 
     _set_campaign_phase(campaign_id, final_status)
     with _campaign_status_lock:
@@ -189,6 +190,21 @@ def _safe_vault_write(campaign: dict) -> None:
     """Vault writes are best-effort and never raise into the runner."""
     try:
         vault_write_campaign_note(campaign)
+    except Exception:
+        pass
+
+
+def _safe_emit_evidence(campaign_id: str) -> None:
+    """Best-effort evidence-bundle emission; never raises into the runner.
+
+    Same semantic contract as ``_safe_vault_write``: any failure is
+    swallowed so a transient signing-key absence (or a calculator
+    plugin crash) doesn't kill the campaign. Real failures are surfaced
+    on the next ``GET /campaigns/{id}/evidence/verify`` call.
+    """
+    try:
+        from evidence.builder import build_bundle  # lazy: avoids import cycles
+        build_bundle(campaign_id)
     except Exception:
         pass
 
@@ -207,3 +223,4 @@ def _record_run(
     campaigns[campaign_id]["updated_at"] = _utcnow_iso()
     save_campaigns(campaigns)
     _safe_vault_write(campaigns[campaign_id])
+    _safe_emit_evidence(campaign_id)

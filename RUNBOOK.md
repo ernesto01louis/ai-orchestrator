@@ -92,6 +92,46 @@ curl -s http://127.0.0.1:8000/control/status
 
 `pause` blocks new runs but lets in-flight runs finish.
 
+## Evidence-bundle signing key
+
+Phase 1.2 evidence bundles are signed with an Ed25519 key at
+`/etc/ai-orchestrator/signing/`. First-time install:
+
+```bash
+bash scripts/install_signing_key.sh
+ls -la /etc/ai-orchestrator/signing/
+# ed25519.seed  chmod 600 (PRIVATE — never copy off-host)
+# ed25519.pub   chmod 644 (public, ships with bundles)
+```
+
+The script is idempotent — re-running prints the keyid and exits.
+Use `--force` to **rotate**, but be aware: rotation invalidates every
+previously-signed bundle. The signing module expects a single
+host-wide key; per-user / per-tenant scoping is a Phase 2.x decision.
+
+To fetch a campaign's signed evidence:
+
+```bash
+# JSON
+curl -s http://127.0.0.1:8000/campaigns/<id>/evidence | jq
+
+# Full RO-Crate (zip — drop into a paper appendix)
+curl -O http://127.0.0.1:8000/campaigns/<id>/evidence.crate.zip
+unzip campaign-*.crate.zip -d bundle/
+python -m evidence.verify --crate-dir bundle/
+# → "OK  crate at … verifies cleanly"
+
+# Recompute + verify in-place via API (no Python needed)
+curl -s http://127.0.0.1:8000/campaigns/<id>/evidence/verify | jq
+```
+
+If the verify route returns errors, the bundle has been tampered with
+(or the manifest is stale). Re-emit:
+
+```bash
+curl -sX POST http://127.0.0.1:8000/campaigns/<id>/evidence/refresh
+```
+
 ## Run the test suite
 
 ```bash
