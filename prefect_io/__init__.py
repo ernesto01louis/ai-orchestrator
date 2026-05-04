@@ -67,10 +67,15 @@ def _raw_healthcheck() -> bool:
 
 
 def _healthcheck() -> bool:
-    """Wrapper around _raw_healthcheck that swallows transport exceptions."""
+    """Defense-in-depth wrapper around _raw_healthcheck.
+
+    `_raw_healthcheck` already returns False on transport errors; this catch
+    handles unexpected programmer errors (AttributeError on missing config,
+    etc.) so a misconfigured server URL never breaks submission.
+    """
     try:
         return _raw_healthcheck()
-    except (socket.timeout, OSError, Exception):
+    except Exception:
         return False
 
 
@@ -114,19 +119,24 @@ def _set_flow_run_state(flow_run_id: str, state_type: str) -> None:
 
 
 def _run_deployment(deployment_name: str, parameters: dict[str, Any]) -> str:
-    """Submit a flow run via Prefect deployment; return flow_run_id."""
-    import asyncio
+    """Submit a flow run via Prefect deployment; return flow_run_id.
 
-    from prefect.deployments import run_deployment
-    result = run_deployment(
-        name=deployment_name, parameters=parameters, timeout=0
-    )
-    # run_deployment may return a coroutine when called outside an async context
+    `prefect.deployments.run_deployment` returns FlowRun synchronously when
+    called from a sync context, or a Coroutine[FlowRun] when called from an
+    async context. We're only ever called from sync code; if a coroutine
+    comes back we drive it with asyncio.run.
+
+    NOTE: must NOT be called from inside a running event loop. The FastAPI
+    handlers that submit flows are sync, so this is safe in current usage.
+    """
+    import asyncio
+    from prefect.deployments import run_deployment as _rd
+    # timeout=0 means submit-and-return-immediately, do NOT block waiting
+    # for the run to finish.
+    result = _rd(name=deployment_name, parameters=parameters, timeout=0)
     if asyncio.iscoroutine(result):
-        flow_run = asyncio.get_event_loop().run_until_complete(result)
-    else:
-        flow_run = result
-    return str(flow_run.id)
+        result = asyncio.run(result)
+    return str(result.id)
 
 
 # ---------------------------------------------------------------------------

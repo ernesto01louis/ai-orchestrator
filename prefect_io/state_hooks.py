@@ -10,17 +10,19 @@ import logging
 from typing import Any
 
 from core.llm_call_log import LLM_CALL_LOG, LlmCallRecord
-from core.runtime import RUN_STATUS, _run_status_lock
 
 logger = logging.getLogger(__name__)
 
 
 def _update_run_status(run_id: str, **fields: Any) -> None:
-    """Update RUN_STATUS[run_id] under lock; broadcast happens via existing
-    code path in core.runtime."""
-    with _run_status_lock:
-        cur = RUN_STATUS.setdefault(run_id, {})
-        cur.update(fields)
+    """Delegate to core.runtime._update_run_status which acquires the lock,
+    mutates RUN_STATUS, broadcasts to /ws, and persists.
+
+    Kept as a thin wrapper so hooks can be re-pointed (e.g. for tests)
+    without touching every call site.
+    """
+    from core.runtime import _update_run_status as _update
+    _update(run_id, **fields)
 
 
 def _extract_run_id(flow_run: Any) -> str | None:
