@@ -100,7 +100,7 @@ def test_task_completion_with_llm_call_tag_appends_to_buffer():
         "model": "qwen2.5",
         "messages": [{"role": "user", "content": "hi"}],
         "options": {"temperature": 0.0},
-        "_run_id": "r4",
+        "run_id": "r4",
     }
     on_task_completion(task, task_run, state)
     drained = LLM_CALL_LOG.drain("r4")
@@ -114,7 +114,7 @@ def test_task_completion_without_llm_call_tag_is_noop():
 
     LLM_CALL_LOG.drain("r5")
     task, task_run, state = _mk_task_ctx(tags=["agent"])
-    task_run.parameters = {"_run_id": "r5"}
+    task_run.parameters = {"run_id": "r5"}
     on_task_completion(task, task_run, state)
     assert LLM_CALL_LOG.drain("r5") == []
 

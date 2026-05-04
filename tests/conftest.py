@@ -15,10 +15,20 @@ from pathlib import Path
 
 import httpx
 import pytest
+from prefect.testing.utilities import prefect_test_harness
 
 # Make the orchestrator package importable as if we ran from the repo root.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _prefect_test_harness():
+    """All tests run with a temporary Prefect SQLite DB so @flow/@task
+    decorators function (state tracking, hooks fire) without needing
+    a real Prefect server."""
+    with prefect_test_harness():
+        yield
 
 
 LIVE_BASE_URL = os.environ.get("ORCHESTRATOR_URL", "http://127.0.0.1:8000")

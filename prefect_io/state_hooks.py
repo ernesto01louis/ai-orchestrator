@@ -105,7 +105,7 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             return
 
         params = getattr(task_run, "parameters", None) or {}
-        run_id = params.get("_run_id")
+        run_id = params.get("run_id")
         if not run_id:
             return
 

@@ -10,6 +10,8 @@ import json
 import time
 
 import requests
+from prefect import task
+from prefect.cache_policies import NO_CACHE
 
 from core.config import (
     OLLAMA_JUDGE_URL,
@@ -19,6 +21,7 @@ from core.config import (
     TIMEOUT_LLM_STRUCTURED,
 )
 from core.runtime import log
+from prefect_io.state_hooks import on_task_completion
 
 from .repair import safe_parse_json
 
@@ -72,6 +75,15 @@ def query_ollama_api(base_url: str, endpoint: str, timeout: int = 10):
 
 
 # ── free-form generation (/api/generate) ───────────
+@task(
+    name="query_ollama",
+    tags={"llm-call"},
+    retries=3,
+    retry_delay_seconds=[1, 5, 15],
+    cache_policy=NO_CACHE,
+    on_completion=[on_task_completion],
+    on_failure=[on_task_completion],
+)
 def query_ollama(model, prompt, url, run_id):
     log(run_id, f"LLM request -> {model}")
     try:
@@ -97,6 +109,15 @@ def query_ollama(model, prompt, url, run_id):
 
 
 # ── structured chat (/api/chat with format) ────────
+@task(
+    name="query_ollama_structured",
+    tags={"llm-call"},
+    retries=3,
+    retry_delay_seconds=[1, 5, 15],
+    cache_policy=NO_CACHE,
+    on_completion=[on_task_completion],
+    on_failure=[on_task_completion],
+)
 def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_id):
     """Structured query with JSON-schema enforcement and temperature 0."""
     log(run_id, f"LLM structured request -> {model}")
