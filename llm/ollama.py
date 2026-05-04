@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass, field
+from typing import Any
 
 import requests
 from prefect import task
@@ -24,6 +26,22 @@ from core.runtime import log
 from prefect_io.state_hooks import on_task_completion
 
 from .repair import safe_parse_json
+
+
+@dataclass
+class LlmResponse:
+    """Carries Ollama output + full envelope so state hooks can extract
+    eval_count without a side channel. Returned by query_ollama (text path)
+    and query_ollama_structured (parsed path); the unused field stays at
+    its default."""
+    text: str = ""
+    parsed: Any = None
+    envelope: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def eval_count(self) -> int:
+        return int(self.envelope.get("eval_count") or 0)
+
 
 # ── model-aware URL routing ────────────────────────
 _url_cache: dict = {}
@@ -84,7 +102,7 @@ def query_ollama_api(base_url: str, endpoint: str, timeout: int = 10):
     on_completion=[on_task_completion],
     on_failure=[on_task_completion],
 )
-def query_ollama(model, prompt, url, run_id):
+def query_ollama(model, prompt, url, run_id) -> LlmResponse:
     log(run_id, f"LLM request -> {model}")
     try:
         r = requests.post(
@@ -93,19 +111,20 @@ def query_ollama(model, prompt, url, run_id):
             timeout=TIMEOUT_LLM_GENERATE,
         )
         r.raise_for_status()
-        return r.json().get("response", "")
+        envelope = r.json()
+        return LlmResponse(text=envelope.get("response", ""), envelope=envelope)
     except requests.exceptions.Timeout:
         log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_GENERATE}s)")
-        return ""
+        return LlmResponse(text="")
     except requests.exceptions.ConnectionError as e:
         log(run_id, f"LLM connection failed for {model}: {e}")
-        return ""
+        return LlmResponse(text="")
     except requests.exceptions.HTTPError as e:
         log(run_id, f"LLM HTTP error for {model}: {e}")
-        return ""
+        return LlmResponse(text="")
     except json.JSONDecodeError as e:
         log(run_id, f"LLM returned invalid JSON for {model}: {e}")
-        return ""
+        return LlmResponse(text="")
 
 
 # ── structured chat (/api/chat with format) ────────
@@ -118,7 +137,7 @@ def query_ollama(model, prompt, url, run_id):
     on_completion=[on_task_completion],
     on_failure=[on_task_completion],
 )
-def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_id):
+def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_id) -> LlmResponse:
     """Structured query with JSON-schema enforcement and temperature 0."""
     log(run_id, f"LLM structured request -> {model}")
     messages = []
@@ -139,20 +158,21 @@ def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_
             timeout=TIMEOUT_LLM_STRUCTURED,
         )
         r.raise_for_status()
-        content = r.json().get("message", {}).get("content", "")
+        envelope = r.json()
+        content = envelope.get("message", {}).get("content", "")
         if not content:
             log(run_id, f"structured query returned empty content from {model}")
-            return None
-        return safe_parse_json(content, run_id, context=model)
+            return LlmResponse(envelope=envelope)
+        return LlmResponse(parsed=safe_parse_json(content, run_id, context=model), envelope=envelope)
     except requests.exceptions.Timeout:
         log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_STRUCTURED}s)")
-        return None
+        return LlmResponse()
     except requests.exceptions.ConnectionError as e:
         log(run_id, f"LLM connection failed for {model}: {e}")
-        return None
+        return LlmResponse()
     except requests.exceptions.HTTPError as e:
         log(run_id, f"LLM HTTP error for {model}: {e}")
-        return None
+        return LlmResponse()
     except json.JSONDecodeError as e:
         log(run_id, f"LLM returned invalid response envelope for {model}: {e}")
-        return None
+        return LlmResponse()

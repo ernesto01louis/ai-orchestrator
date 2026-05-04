@@ -608,7 +608,7 @@ def planner_agent(prompt, model, env, memory_context, run_id):
         PLAN_SCHEMA,
         resolve_chat_url(model),
         run_id
-    )
+    ).parsed
 
     if result:
 
@@ -656,7 +656,7 @@ def planner_agent(prompt, model, env, memory_context, run_id):
     # fallback: use /api/generate without schema enforcement
     log(run_id, "structured planner failed, falling back to unstructured")
 
-    raw = query_ollama(model, user_prompt, OLLAMA_PLANNER, run_id)
+    raw = query_ollama(model, user_prompt, OLLAMA_PLANNER, run_id).text
 
     parsed = safe_parse_json(raw, run_id, context="planner fallback")
 
@@ -726,7 +726,7 @@ def judge_score(files, prompt, plan, model, run_id):
             JUDGE_SCHEMA,
             resolve_chat_url(model),
             run_id
-        )
+        ).parsed
 
         if result and isinstance(result, dict):
             overall = result.get("overall", 0)
@@ -741,7 +741,7 @@ def judge_score(files, prompt, plan, model, run_id):
         # fallback: unstructured
         log(run_id, "structured judge failed, falling back to unstructured")
 
-        raw = query_ollama(model, user_prompt, OLLAMA_JUDGE, run_id)
+        raw = query_ollama(model, user_prompt, OLLAMA_JUDGE, run_id).text
 
         parsed = safe_parse_json(raw, run_id, context="judge fallback")
 
@@ -770,7 +770,7 @@ def judge_score(files, prompt, plan, model, run_id):
             JUDGE_SCHEMA,
             OLLAMA_MAIN_CHAT,
             run_id
-        )
+        ).parsed
 
         if result and isinstance(result, dict):
             overall = result.get("overall", 0)
@@ -781,7 +781,7 @@ def judge_score(files, prompt, plan, model, run_id):
             log(run_id, f"fallback judge score: {overall}")
             return overall, result
 
-        raw = query_ollama(JUDGE_FALLBACK_MODEL, user_prompt, resolve_generate_url(JUDGE_FALLBACK_MODEL), run_id)
+        raw = query_ollama(JUDGE_FALLBACK_MODEL, user_prompt, resolve_generate_url(JUDGE_FALLBACK_MODEL), run_id).text
         parsed = safe_parse_json(raw, run_id, context="fallback judge")
         if parsed and isinstance(parsed, dict):
             overall = parsed.get("overall", 0)
@@ -849,7 +849,7 @@ def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, to
         file_descriptions=file_descriptions,
     )
 
-    raw = query_ollama(model, gen_prompt, resolve_generate_url(model), run_id)
+    raw = query_ollama(model, gen_prompt, resolve_generate_url(model), run_id).text
 
     files = extract_files(raw, plan)
 
@@ -909,7 +909,7 @@ def optimizer_agent(files, prompt, judge, plan, model, run_id):
             improvements=improve,
             code=files[filename],
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         code = extract_code(raw)
         if code:
             return {filename: code}
@@ -924,7 +924,7 @@ def optimizer_agent(files, prompt, judge, plan, model, run_id):
             formatted_files=formatted,
             entrypoint=entrypoint,
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         result = extract_files(raw, plan)
         return result if result else files
 
@@ -956,7 +956,7 @@ def troubleshoot(files, error, prompt, plan, model, run_id):
             error=error,
             code=files[filename],
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         code = extract_code(raw)
         if code:
             return {filename: code}
@@ -971,7 +971,7 @@ def troubleshoot(files, error, prompt, plan, model, run_id):
             error=error,
             formatted_files=formatted,
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         result = extract_files(raw, plan)
         return result if result else files
 

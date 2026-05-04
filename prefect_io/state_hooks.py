@@ -132,10 +132,11 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             result = state.result(raise_on_failure=False) if callable(
                 getattr(state, "result", None)
             ) else None
-            if isinstance(result, dict):
-                response_tokens = (
-                    result.get("eval_count") or result.get("response_tokens") or 0
-                )
+            # LlmResponse exposes .eval_count; legacy dict has "eval_count" key.
+            candidate = getattr(result, "eval_count", None)
+            if candidate is None and isinstance(result, dict):
+                candidate = result.get("eval_count") or result.get("response_tokens")
+            response_tokens = int(candidate or 0)
         except Exception:
             response_tokens = 0
 
