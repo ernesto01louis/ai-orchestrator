@@ -21,6 +21,7 @@ from pathlib import Path
 
 import requests
 from pydantic import BaseModel
+from prefect import flow, task
 
 from agents.loader import load_agent
 from core.config import (
@@ -584,6 +585,7 @@ class OrchestrateRequest(BaseModel):
 
 
 
+@task(name="planner_agent", retries=0)
 def planner_agent(prompt, model, env, memory_context, run_id):
 
     # Load planner agent config from agents/planner/
@@ -1016,7 +1018,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             ref_names = ", ".join(req.reference_files)
             memory_context += f"\n\nATTACHED REFERENCE DOCUMENTS: {ref_names}\nThe generator will receive the full content of these documents. Plan accordingly — the user has provided these as context for the task."
 
-        plan = planner_agent(req.prompt, req.planner_model, env, memory_context, run_id)
+        plan = planner_agent.submit(req.prompt, req.planner_model, env, memory_context, run_id).result()
 
         language = plan.get("language", "python").lower()
         project_type = plan.get("project_type", "script")
