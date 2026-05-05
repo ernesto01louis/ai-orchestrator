@@ -11,7 +11,6 @@ import json
 import os
 import re
 import shlex
-import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -2004,7 +2003,7 @@ def create_campaign(req: CampaignCreate):
         raise HTTPException(status_code=400, detail=str(e))
 
     # Lazy import to avoid circular at module load.
-    from orchestration.campaign import expand_grid, run_campaign
+    from orchestration.campaign import expand_grid
 
     campaign_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
@@ -2031,11 +2030,15 @@ def create_campaign(req: CampaignCreate):
             "current_run_id": None,
         }
 
-    thread = threading.Thread(target=run_campaign, args=(campaign_id,), daemon=True)
-    thread.start()
+    result = submit_campaign(campaign_id)
+
+    with _campaign_status_lock:
+        if campaign_id in CAMPAIGN_STATUS:
+            CAMPAIGN_STATUS[campaign_id]["flow_run_id"] = result["flow_run_id"]
 
     return {
         "campaign_id": campaign_id,
+        "flow_run_id": result["flow_run_id"],
         "run_count": len(combos),
         "status": "started",
         "poll": f"/campaigns/{campaign_id}",
