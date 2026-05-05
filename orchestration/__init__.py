@@ -1504,7 +1504,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
         # Gates: consolidate lessons at end of run
         try:
-            gate_report = consolidate_lessons(log_fn=log)
+            gate_report = consolidate_lessons.submit(log_fn=log).result(raise_on_failure=False)
             if gate_report.get("promoted_count", 0) > 0:
                 log(run_id, f"gates: {gate_report['promoted_count']} new rules auto-promoted")
         except Exception as e:
