@@ -1225,7 +1225,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             if not models_tried:
                 models_tried = req.generator_models
 
-            update_negative_memory(
+            update_negative_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1235,7 +1235,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 failure_stage="generation",
                 models_tried=models_tried,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
 
             _update_run_status(run_id, completed=True, error="All generators failed to produce valid code")
 
@@ -1355,7 +1355,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
         if execution["returncode"] == 0:
             # positive memory
-            update_memory(
+            update_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1366,10 +1366,10 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 winning_model=best_model,
                 troubleshoot_attempts=troubleshoot_attempt,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
         else:
             # still record in positive memory (with success=False) for similarity matching
-            update_memory(
+            update_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1380,7 +1380,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 winning_model=best_model,
                 troubleshoot_attempts=troubleshoot_attempt,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
 
             # negative memory — record what went wrong
             error_summary = execution.get("stderr", "")[:500]
@@ -1393,7 +1393,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
             models_tried = list(set(c.get("model", "") for c in all_candidate_results if c.get("model")))
 
-            update_negative_memory(
+            update_negative_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1403,12 +1403,12 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 failure_stage=failure_stage,
                 models_tried=models_tried,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
 
         # rewrite primer.md with current state (Layer 2)
         env_summary = f"Target: {req.deploy_target}, Python: {env.get('python', '?')}, Node: {env.get('node', '?')}"
         try:
-            rewrite_primer(
+            rewrite_primer.submit(
                 run_id=run_id,
                 project_name=req.project_name,
                 language=language,
@@ -1423,7 +1423,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 troubleshoot_attempts=troubleshoot_attempt,
                 winning_model=best_model,
                 env_summary=env_summary
-            )
+            ).result(raise_on_failure=False)
         except Exception as e:
             log(run_id, f"primer rewrite failed (non-fatal): {e}")
 
