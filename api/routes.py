@@ -209,6 +209,9 @@ def status(run_id: str):
         "completed": info["completed"],
     }
 
+    if info.get("flow_run_id"):
+        response["flow_run_id"] = info["flow_run_id"]
+
     if info.get("project"):
         response["project"] = info["project"]
 
