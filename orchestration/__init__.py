@@ -21,6 +21,9 @@ from pathlib import Path
 import requests
 from pydantic import BaseModel
 from prefect import flow, task, unmapped
+from prefect_io.state_hooks import (
+    on_running, on_completion, on_failure, on_cancelled,
+)
 
 from agents.loader import load_agent
 from core.config import (
@@ -985,6 +988,15 @@ def troubleshoot(files, error, prompt, plan, model, run_id):
 # ORCHESTRATOR CORE
 # ------------------------------------------------
 
+@flow(
+    name="orchestrate",
+    retries=1,
+    retry_delay_seconds=60,
+    on_running=[on_running],
+    on_completion=[on_completion],
+    on_failure=[on_failure],
+    on_cancellation=[on_cancelled],
+)
 def run_orchestration(req: OrchestrateRequest, run_id: str):
 
     try:
