@@ -74,6 +74,7 @@ from core.runtime import (
     _campaign_status_lock,
     _init_run_status,
     _load_run_index,
+    _run_status_lock,
     _ws_clients,
     _ws_lock,
     log,
@@ -137,7 +138,13 @@ from orchestration import (
     get_available_models,
     get_loaded_models,
     get_orchestrator_health,
-    run_orchestration,
+)
+from prefect_io import (  # noqa: F401
+    cancel_flow_run,
+    pause_flow_run,
+    resume_flow_run,
+    submit_campaign,
+    submit_orchestration,
 )
 from references_pkg import (
     MAX_REFERENCE_UPLOAD_BYTES,
@@ -173,17 +180,18 @@ def orchestrate(req: OrchestrateRequest):
 
     _init_run_status(run_id, project=req.project_name, target=req.deploy_target)
 
-    thread = threading.Thread(
-        target=run_orchestration,
-        args=(req, run_id),
-        daemon=True
-    )
-    thread.start()
+    result = submit_orchestration(req, run_id)
+
+    # Keep flow_run_id alongside RUN_STATUS so pause/resume/cancel can target it.
+    with _run_status_lock:
+        if run_id in RUN_STATUS:
+            RUN_STATUS[run_id]["flow_run_id"] = result["flow_run_id"]
 
     return {
         "run_id": run_id,
+        "flow_run_id": result["flow_run_id"],
         "status": "started",
-        "poll": f"/status/{run_id}"
+        "poll": f"/status/{run_id}",
     }
 
 
