@@ -15,13 +15,12 @@ import subprocess
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
 import requests
 from pydantic import BaseModel
-from prefect import flow, task
+from prefect import flow, task, unmapped
 
 from agents.loader import load_agent
 from core.config import (
@@ -803,6 +802,7 @@ def judge_score(files, prompt, plan, model, run_id):
 # GENERATOR (free-form code output)
 # ------------------------------------------------
 
+@task(name="generate_candidate", retries=0)
 def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, tool_context=""):
 
     log(run_id, f"generator start -> {model}")
@@ -1114,35 +1114,31 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             score_at_iter_start = best_score
             log(run_id, f"generation iteration {i+1}")
 
-            with ThreadPoolExecutor(max_workers=len(req.generator_models)) as ex:
+            # combine tool context and reference documents for generator
+            combined_context = tool_context
+            if ref_context:
+                combined_context = (combined_context + "\n" + ref_context) if combined_context else ref_context
 
-                # combine tool context and reference documents for generator
-                combined_context = tool_context
-                if ref_context:
-                    combined_context = (combined_context + "\n" + ref_context) if combined_context else ref_context
+            # Prefect .map() distributes one task run per generator model.
+            # plan and env are dicts; wrap with unmapped() so they're broadcast
+            # as scalars instead of iterated over their keys.
+            futures = generate_candidate.map(
+                model=req.generator_models,
+                prompt=req.prompt,
+                plan=unmapped(plan),
+                env=unmapped(env),
+                judge_model=req.judge_model,
+                target=req.deploy_target,
+                run_id=run_id,
+                tool_context=combined_context,
+            )
 
-                futures = {
-                    ex.submit(
-                        generate_candidate,
-                        model,
-                        req.prompt,
-                        plan,
-                        env,
-                        req.judge_model,
-                        req.deploy_target,
-                        run_id,
-                        combined_context
-                    ): model
-                    for model in req.generator_models
-                }
-
-                candidates = []
-                for future in as_completed(futures):
-                    try:
-                        candidates.append(future.result())
-                    except Exception as e:
-                        model_name = futures[future]
-                        log(run_id, f"generator failed for {model_name}: {e}")
+            candidates = []
+            for fut, model in zip(futures, req.generator_models):
+                try:
+                    candidates.append(fut.result())
+                except Exception as e:
+                    log(run_id, f"generator failed for {model}: {e}")
 
             candidates.sort(key=lambda x: x["score"], reverse=True)
 
