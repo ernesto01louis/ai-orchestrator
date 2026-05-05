@@ -52,9 +52,21 @@ def _safe_emit_evidence(campaign_id: str) -> None:
 
 def on_running(flow: Any, flow_run: Any, state: Any) -> None:
     try:
+        real_flow_run_id = str(getattr(flow_run, "id", "") or "") or None
         run_id = _extract_run_id(flow_run)
         if run_id:
-            _update_run_status(run_id, phase=state.name)
+            updates: dict[str, Any] = {"phase": state.name}
+            if real_flow_run_id:
+                updates["flow_run_id"] = real_flow_run_id
+            _update_run_status(run_id, **updates)
+
+        if real_flow_run_id and getattr(flow, "name", "") == "campaign":
+            campaign_id = _extract_campaign_id(flow_run)
+            if campaign_id:
+                from core.runtime import CAMPAIGN_STATUS, _campaign_status_lock
+                with _campaign_status_lock:
+                    if campaign_id in CAMPAIGN_STATUS:
+                        CAMPAIGN_STATUS[campaign_id]["flow_run_id"] = real_flow_run_id
     except Exception as e:
         logger.warning("on_running hook error: %s", e)
 

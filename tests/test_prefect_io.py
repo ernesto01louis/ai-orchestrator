@@ -28,13 +28,17 @@ def deployment_config(monkeypatch):
     )
 
 
-def test_submit_orchestration_in_process_returns_flow_run_id(in_process_config):
+def test_submit_orchestration_in_process_returns_null_flow_run_id(in_process_config):
+    """In-process mode lets Prefect generate the real flow_run_id once the
+    @flow runs; the on_running state hook copies it into RUN_STATUS. The
+    immediate POST response therefore returns ``flow_run_id=None`` and
+    callers poll /status/<run_id> for the real value.
+    """
     with patch("prefect_io._healthcheck", return_value=True), \
-         patch("prefect_io._spawn_daemon_thread") as spawn_mock, \
-         patch("prefect_io._allocate_flow_run_id", return_value="frid-123"):
+         patch("prefect_io._spawn_daemon_thread") as spawn_mock:
         req = MagicMock()
         out = submit_orchestration(req, run_id="r1")
-        assert out == {"run_id": "r1", "flow_run_id": "frid-123"}
+        assert out == {"run_id": "r1", "flow_run_id": None}
         spawn_mock.assert_called_once()
 
 
@@ -65,12 +69,14 @@ def test_submit_orchestration_deployment_mode_calls_run_deployment(
         spawn_mock.assert_not_called()
 
 
-def test_submit_campaign_in_process_returns_flow_run_id(in_process_config):
+def test_submit_campaign_in_process_returns_null_flow_run_id(in_process_config):
+    """Same contract as orchestration: in-process mode returns
+    ``flow_run_id=None`` and the on_running hook fills CAMPAIGN_STATUS.
+    """
     with patch("prefect_io._healthcheck", return_value=True), \
-         patch("prefect_io._spawn_daemon_thread"), \
-         patch("prefect_io._allocate_flow_run_id", return_value="frid-c"):
+         patch("prefect_io._spawn_daemon_thread"):
         out = submit_campaign(campaign_id="camp-1")
-        assert out == {"campaign_id": "camp-1", "flow_run_id": "frid-c"}
+        assert out == {"campaign_id": "camp-1", "flow_run_id": None}
 
 
 def test_pause_flow_run_calls_prefect_api():

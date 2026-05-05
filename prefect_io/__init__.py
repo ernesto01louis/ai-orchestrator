@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import socket
 import threading
-import uuid
 from typing import Any
 
 from core.config import CONFIG
@@ -96,11 +95,6 @@ def _notify_prefect_down() -> None:
 # Flow run id allocation + state setting
 # ---------------------------------------------------------------------------
 
-def _allocate_flow_run_id() -> str:
-    """Pre-allocate a Prefect flow run id (uuid4 string)."""
-    return str(uuid.uuid4())
-
-
 def _set_flow_run_state(flow_run_id: str, state_type: str) -> None:
     """Best-effort state transition via Prefect REST API.
 
@@ -144,13 +138,15 @@ def _run_deployment(deployment_name: str, parameters: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _spawn_daemon_thread(
-    flow_callable: Any, args: tuple[Any, ...], flow_run_id: str
+    flow_callable: Any, args: tuple[Any, ...]
 ) -> None:
     """In-process mode: invoke flow_callable in a daemon thread.
 
     Calling the flow callable (NOT .fn) keeps Prefect's state tracking,
     hooks, and retries active; the daemon thread is just to free the
-    FastAPI request handler.
+    FastAPI request handler. Prefect generates the real flow_run_id when
+    the flow starts; the on_running state hook copies it into RUN_STATUS /
+    CAMPAIGN_STATUS so pause/resume/cancel endpoints can target it.
     """
     threading.Thread(target=flow_callable, args=args, daemon=True).start()
 
@@ -194,11 +190,13 @@ def submit_orchestration(req: Any, run_id: str) -> dict[str, str | None]:
         )
         return {"run_id": run_id, "flow_run_id": flow_run_id}
 
-    # in_process
-    flow_run_id = _allocate_flow_run_id()
+    # in_process — Prefect generates the real flow_run_id on its own when the
+    # @flow runs. The on_running state hook captures it into RUN_STATUS so
+    # pause/resume/cancel can target it. We can't return it synchronously
+    # because the flow hasn't started yet; callers poll /status/<run_id>.
     from orchestration import run_orchestration
-    _spawn_daemon_thread(run_orchestration, (req, run_id), flow_run_id)
-    return {"run_id": run_id, "flow_run_id": flow_run_id}
+    _spawn_daemon_thread(run_orchestration, (req, run_id))
+    return {"run_id": run_id, "flow_run_id": None}
 
 
 def submit_campaign(campaign_id: str) -> dict[str, str | None]:
@@ -220,10 +218,11 @@ def submit_campaign(campaign_id: str) -> dict[str, str | None]:
         )
         return {"campaign_id": campaign_id, "flow_run_id": flow_run_id}
 
-    flow_run_id = _allocate_flow_run_id()
+    # in_process — Prefect generates the real flow_run_id; the on_running
+    # state hook copies it into CAMPAIGN_STATUS for pause/resume/cancel.
     from orchestration.campaign import run_campaign
-    _spawn_daemon_thread(run_campaign, (campaign_id,), flow_run_id)
-    return {"campaign_id": campaign_id, "flow_run_id": flow_run_id}
+    _spawn_daemon_thread(run_campaign, (campaign_id,))
+    return {"campaign_id": campaign_id, "flow_run_id": None}
 
 
 # ---------------------------------------------------------------------------
