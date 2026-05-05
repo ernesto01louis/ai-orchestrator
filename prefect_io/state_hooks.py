@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import prefect.runtime.task_run as _prefect_task_run
+
 from core.llm_call_log import LLM_CALL_LOG, LlmCallRecord
 
 logger = logging.getLogger(__name__)
@@ -104,7 +106,16 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
         if "llm-call" not in tags:
             return
 
-        params = getattr(task_run, "parameters", None) or {}
+        # Prefer the runtime context (populated by Prefect's TaskRunContext during
+        # execution; task_run.parameters is a server-side model field that Prefect
+        # 3.6.x does NOT populate in the locally-invoked hook context).
+        # Fall back to task_run.parameters so unit tests that inject a MagicMock
+        # with task_run.parameters still pass.
+        params: dict[str, Any] = (
+            _prefect_task_run.parameters
+            or getattr(task_run, "parameters", None)
+            or {}
+        )
         run_id = params.get("run_id")
         if not run_id:
             return
