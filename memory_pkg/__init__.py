@@ -613,6 +613,7 @@ def save_session_log(data):
     locked_write_json(SESSION_LOG, data)
 
 
+@task(name="record_session", retries=2)
 def record_session(run_id, project_name, prompt, language, score, success,
                    winning_model, troubleshoot_attempts):
     """
@@ -848,6 +849,7 @@ if HINDSIGHT_ENABLED:
         print("Hindsight not available at startup (will retry on first use)")
 
 
+@task(name="hindsight_retain", retries=2)
 def hindsight_retain(content, run_id, metadata=None):
     """
     Store a memory in Hindsight.
@@ -2011,6 +2013,7 @@ tags:
     vault_sync_file("", "index.md", run_id)
 
 
+@task(name="vault_after_run", retries=2)
 def vault_after_run(run_id, project_name, prompt, language, project_type,
                      score, success, winning_model, troubleshoot_attempts,
                      entrypoint, files, execution, deploy_path, target,

@@ -1429,7 +1429,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
         # record session (groups runs within time windows)
         try:
-            session_id = record_session(
+            session_id = record_session.submit(
                 run_id=run_id,
                 project_name=req.project_name,
                 prompt=req.prompt,
@@ -1438,7 +1438,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 success=execution["returncode"] == 0,
                 winning_model=best_model,
                 troubleshoot_attempts=troubleshoot_attempt
-            )
+            ).result(raise_on_failure=False)
             log(run_id, f"session: {session_id}")
         except Exception as e:
             log(run_id, f"session recording failed (non-fatal): {e}")
@@ -1463,7 +1463,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                     target=req.deploy_target,
                     plan=plan
                 )
-                hindsight_retain(retain_content, run_id)
+                hindsight_retain.submit(retain_content, run_id).result(raise_on_failure=False)
             except Exception as e:
                 log(run_id, f"hindsight retain failed (non-fatal): {e}")
 
@@ -1490,7 +1490,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
         # write vault notes (L5)
         _run_elapsed_vault = _run_elapsed if '_run_elapsed' in dir() else int(time.time() - _run_start_time)
         try:
-            vault_after_run(
+            vault_after_run.submit(
                 run_id=run_id, project_name=req.project_name, prompt=req.prompt,
                 language=language, project_type=project_type, score=best_score,
                 success=execution["returncode"] == 0, winning_model=best_model,
@@ -1498,7 +1498,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 entrypoint=entrypoint, files=best_files, execution=execution,
                 deploy_path=deploy_path, target=req.deploy_target, plan=plan,
                 best_judge=best_judge, elapsed_seconds=_run_elapsed_vault
-            )
+            ).result(raise_on_failure=False)
         except Exception as e:
             log(run_id, f"vault write failed (non-fatal): {e}")
 
