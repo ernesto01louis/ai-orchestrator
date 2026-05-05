@@ -698,6 +698,7 @@ def planner_agent(prompt, model, env, memory_context, run_id):
 # JUDGE (structured output)
 # ------------------------------------------------
 
+@task(name="judge_score", retries=0)
 def judge_score(files, prompt, plan, model, run_id):
 
     file_list = ", ".join(files.keys())
@@ -873,7 +874,7 @@ def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, to
             "judge": {"verification_errors": errors}
         }
 
-    score, judge = judge_score(files, prompt, plan, judge_model, run_id)
+    score, judge = judge_score.submit(files, prompt, plan, judge_model, run_id).result()
 
     return {
         "model": model,
@@ -1188,13 +1189,13 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
                     if all_passed:
 
-                        opt_score, opt_judge = judge_score(
+                        opt_score, opt_judge = judge_score.submit(
                             optimized_files,
                             req.prompt,
                             plan,
                             req.judge_model,
                             run_id
-                        )
+                        ).result()
 
                         log(run_id, f"optimizer score {opt_score} (was {best_score})")
 
