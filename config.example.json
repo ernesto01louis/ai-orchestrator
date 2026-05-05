@@ -101,5 +101,10 @@
       "api_key": ""
     }
   },
-  "mcp_servers": {}
+  "mcp_servers": {},
+  "prefect": {
+    "api_url": "http://prefect.tailnet:4200/api",
+    "execution_mode": "in_process",
+    "work_pool": "orchestrator-pool"
+  }
 }
