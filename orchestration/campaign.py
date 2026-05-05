@@ -19,7 +19,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from prefect import task
+from prefect import flow, task
+from prefect_io.state_hooks import (
+    on_running, on_completion, on_failure, on_cancelled,
+)
 
 from core.runtime import (
     CAMPAIGN_STATUS,
@@ -99,6 +102,14 @@ def _is_paused(campaign_id: str) -> bool:
         return bool(CAMPAIGN_STATUS.get(campaign_id, {}).get("paused"))
 
 
+@flow(
+    name="campaign",
+    retries=0,
+    on_running=[on_running],
+    on_completion=[on_completion],
+    on_failure=[on_failure],
+    on_cancellation=[on_cancelled],
+)
 def run_campaign(campaign_id: str) -> None:
     """Daemon-thread entry. Sequentially expands the grid and runs each
     combo through ``run_orchestration``, persisting per-run records into
@@ -163,7 +174,7 @@ def run_campaign(campaign_id: str) -> None:
         )
 
         try:
-            run_orchestration(req, run_id)
+            run_orchestration.with_options(name=f"orchestrate-{run_id[:8]}")(req, run_id)
         except Exception as e:
             log(run_id, f"[campaign {campaign_id}] run crashed: {e}\n{traceback.format_exc()}")
 
