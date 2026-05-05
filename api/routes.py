@@ -138,7 +138,7 @@ from orchestration import (
     get_loaded_models,
     get_orchestrator_health,
 )
-from prefect_io import (  # noqa: F401
+from prefect_io import (
     cancel_flow_run,
     pause_flow_run,
     resume_flow_run,
@@ -2102,14 +2102,18 @@ def get_campaign_tree(campaign_id: str):
 def pause_campaign(campaign_id: str):
     _campaign_or_404(campaign_id)
     _set_campaign_flag(campaign_id, "paused", True)
-    return {"campaign_id": campaign_id, "paused": True}
+    flow_run_id = CAMPAIGN_STATUS.get(campaign_id, {}).get("flow_run_id")
+    pause_flow_run(flow_run_id)
+    return {"campaign_id": campaign_id, "paused": True, "flow_run_id": flow_run_id}
 
 
 @router.post("/campaigns/{campaign_id}/resume")
 def resume_campaign(campaign_id: str):
     _campaign_or_404(campaign_id)
     _set_campaign_flag(campaign_id, "paused", False)
-    return {"campaign_id": campaign_id, "paused": False}
+    flow_run_id = CAMPAIGN_STATUS.get(campaign_id, {}).get("flow_run_id")
+    resume_flow_run(flow_run_id)
+    return {"campaign_id": campaign_id, "paused": False, "flow_run_id": flow_run_id}
 
 
 @router.post("/campaigns/{campaign_id}/abort")
@@ -2119,7 +2123,9 @@ def abort_campaign(campaign_id: str):
     """
     _campaign_or_404(campaign_id)
     _set_campaign_flag(campaign_id, "aborted", True)
-    return {"campaign_id": campaign_id, "aborted": True}
+    flow_run_id = CAMPAIGN_STATUS.get(campaign_id, {}).get("flow_run_id")
+    cancel_flow_run(flow_run_id)
+    return {"campaign_id": campaign_id, "aborted": True, "flow_run_id": flow_run_id}
 
 
 # ------------------------------------------------
