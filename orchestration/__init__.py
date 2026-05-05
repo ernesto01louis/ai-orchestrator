@@ -888,6 +888,7 @@ def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, to
 # OPTIMIZER
 # ------------------------------------------------
 
+@task(name="optimizer_agent", retries=0)
 def optimizer_agent(files, prompt, judge, plan, model, run_id):
 
     if not model:
@@ -1170,14 +1171,14 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             if not best_judge:
                 log(run_id, "no judge feedback available, skipping optimizer")
             else:
-                optimized_files = optimizer_agent(
+                optimized_files = optimizer_agent.submit(
                     best_files,
                     req.prompt,
                     best_judge,
                     plan,
                     req.optimizer_model,
                     run_id
-                )
+                ).result()
 
                 if optimized_files and optimized_files != best_files:
 
