@@ -937,6 +937,7 @@ def optimizer_agent(files, prompt, judge, plan, model, run_id):
 # TROUBLESHOOTER
 # ------------------------------------------------
 
+@task(name="troubleshoot", retries=0)
 def troubleshoot(files, error, prompt, plan, model, run_id):
 
     if not model:
@@ -1264,14 +1265,14 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
             log(run_id, f"troubleshoot attempt {troubleshoot_attempt}/{MAX_TROUBLESHOOT_ATTEMPTS}")
 
-            fixed_files = troubleshoot(
+            fixed_files = troubleshoot.submit(
                 best_files,
                 execution["stderr"],
                 req.prompt,
                 plan,
                 req.troubleshooter_model,
                 run_id
-            )
+            ).result()
 
             if not fixed_files or fixed_files == best_files:
                 log(run_id, "troubleshooter returned unchanged code, stopping")
