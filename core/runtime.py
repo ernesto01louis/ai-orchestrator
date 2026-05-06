@@ -30,7 +30,10 @@ ORCHESTRATOR_PAUSED = False
 
 # Per-campaign live flags (Phase 1.1). Keyed by campaign_id; entries:
 #   {"phase": "queued"|"running"|"paused"|"completed"|"aborted"|"failed",
-#    "paused": bool, "aborted": bool, "current_run_id": str | None}
+#    "paused": bool, "aborted": bool, "current_run_id": str | None,
+#    "manifest_status": "ok"|"corrupted"|"missing"|"skipped"|None}
+#      - "ok" / "skipped" set by run_campaign hook at end of campaign  (Phase C)
+#      - "corrupted" / "missing" set by /campaigns/{id}/verify-merkle  (Phase D)
 CAMPAIGN_STATUS: dict = {}
 _campaign_status_lock = threading.Lock()
 

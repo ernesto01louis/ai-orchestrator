@@ -2030,7 +2030,7 @@ def create_campaign(req: CampaignCreate):
     with _campaign_status_lock:
         CAMPAIGN_STATUS[campaign_id] = {
             "phase": "queued", "paused": False, "aborted": False,
-            "current_run_id": None,
+            "current_run_id": None, "manifest_status": None,
         }
 
     result = submit_campaign(campaign_id)
