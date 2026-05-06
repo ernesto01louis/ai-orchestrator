@@ -118,3 +118,49 @@ Per-target identity (`memory/targets/<name>.md`) and goals
 | Hindsight | 192.168.2.203:8888 | L4 memory store |
 | ntfy / Gotify | 192.168.2.203:8090 / :80 | Notifications |
 | TrueNAS | 192.168.2.222 | Vault NAS mirror; future Postgres backups |
+
+## Phase 1.3: Prefect 3.x integration
+
+### Submission flow
+
+```
+POST /orchestrate
+  → api.routes.orchestrate
+  → prefect_io.submit_orchestration(req, run_id)
+    in_process mode (default) → daemon thread runs run_orchestration (the @flow,
+                                Prefect engine drives state hooks)
+    deployment mode          → prefect.deployments.run_deployment enqueues;
+                                the systemd prefect-worker.service executes
+    server-down fallback     → daemon thread runs run_orchestration.fn (bypasses
+                                Prefect entirely; inline _update_run_status() calls
+                                keep the WebSocket UI alive)
+  → run_orchestration(req, run_id)  # Prefect @flow
+    on_running hook: capture flow_run.id into RUN_STATUS[run_id]["flow_run_id"]
+    @task agent functions execute (planner, judge, generator.map(...), optimizer, troubleshoot)
+    on_task_completion hook for tasks tagged "llm-call":
+      append LlmCallRecord to LLM_CALL_LOG (run_id-keyed)
+    on_completion / on_failure / on_cancellation hook:
+      mirror state to RUN_STATUS / CAMPAIGN_STATUS for the WebSocket UI
+```
+
+### Execution modes (config.prefect.execution_mode)
+
+| Mode | Behavior |
+|---|---|
+| `in_process` (default) | daemon thread spawns the @flow in-process; Prefect server tracks state via REST |
+| `deployment` | `prefect.deployments.run_deployment` enqueues; the systemd `prefect-worker.service` on the orchestrator LXC executes |
+
+### Server-down fallback
+
+When `prefect_io._healthcheck()` returns False at app startup OR submission fails with a connect error, `prefect_io` falls back to a raw daemon-thread spawn that calls the `.fn` attribute of the @flow directly, bypassing Prefect entirely. Inline `_update_run_status(...)` calls retained inside `run_orchestration`/`run_campaign` keep the WebSocket UI alive on this path.
+
+### Topology
+
+| Service | LXC IP | Tailscale | Purpose |
+|---|---|---|---|
+| prefect-server | 192.168.2.182:4200 | 100.76.57.6:4200 | Prefect 3.6.29 server (SQLite-backed, systemd-managed) |
+| orchestrator | 192.168.2.* | not yet installed | Submits via prefect_io.submit_*; `config.json` `prefect.api_url` points at LAN IP |
+
+### Evidence bundle integration (Phase J α)
+
+`evidence/builder.py:_build_run_records()` calls `LLM_CALL_LOG.drain(run.run_id)` per run and maps each `LlmCallRecord` to a `LlmCall` Pydantic model attached to `RunRecord.llm_calls`. Phase J Scope α uses placeholders for `call_id` (uuid4), `role` ("generator"), `target.host/digest/size`, `response_text`, and `started_at` (approximated from now()−duration_ms). Citation-grade fidelity is tracked in `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`.

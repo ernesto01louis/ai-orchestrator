@@ -183,7 +183,7 @@ def run_tools(prompt, plan, env, target, planner_model, run_id):
         _tool_dispatch_schema(),
         resolve_chat_url(planner_model),
         run_id
-    )
+    ).parsed
 
     if not result or not isinstance(result, dict):
         log(run_id, "tool dispatch failed, skipping tools")

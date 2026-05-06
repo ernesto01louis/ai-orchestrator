@@ -50,6 +50,7 @@ from core.paths import (
     TARGET_IDENTITY_DIR, CAMPAIGNS_FILE,
 )
 from core.runtime import RUN_STATUS, log
+from prefect import task
 
 
 def load_prompt_index():
@@ -170,6 +171,7 @@ def find_similar(prompt):
     return matches[:3]
 
 
+@task(name="update_memory", retries=2)
 def update_memory(prompt, embedding, run_id, score, project, language="python",
                   success=True, winning_model="", troubleshoot_attempts=0,
                   project_type="script"):
@@ -197,6 +199,7 @@ def update_memory(prompt, embedding, run_id, score, project, language="python",
     save_prompt_index(index)
 
 
+@task(name="update_negative_memory", retries=2)
 def update_negative_memory(prompt, embedding, run_id, project, language,
                            error_summary, failure_stage, models_tried,
                            project_type="script"):
@@ -448,6 +451,7 @@ def load_primer():
         return ""
 
 
+@task(name="rewrite_primer", retries=2)
 def rewrite_primer(run_id, project_name, language, project_type, score,
                    entrypoint, files, execution, deploy_path, prompt,
                    plan, troubleshoot_attempts, winning_model, env_summary=""):
@@ -609,6 +613,7 @@ def save_session_log(data):
     locked_write_json(SESSION_LOG, data)
 
 
+@task(name="record_session", retries=2)
 def record_session(run_id, project_name, prompt, language, score, success,
                    winning_model, troubleshoot_attempts):
     """
@@ -844,6 +849,7 @@ if HINDSIGHT_ENABLED:
         print("Hindsight not available at startup (will retry on first use)")
 
 
+@task(name="hindsight_retain", retries=2)
 def hindsight_retain(content, run_id, metadata=None):
     """
     Store a memory in Hindsight.
@@ -2007,6 +2013,7 @@ tags:
     vault_sync_file("", "index.md", run_id)
 
 
+@task(name="vault_after_run", retries=2)
 def vault_after_run(run_id, project_name, prompt, language, project_type,
                      score, success, winning_model, troubleshoot_attempts,
                      entrypoint, files, execution, deploy_path, target,

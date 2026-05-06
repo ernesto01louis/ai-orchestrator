@@ -25,6 +25,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from prefect import task
 
 try:
     from core.paths import GATES_FILE, LESSONS_DIR, GATES_LOG
@@ -286,6 +287,7 @@ def load_all_lessons():
     return lessons
 
 
+@task(name="consolidate_lessons", retries=2)
 def consolidate_lessons(dry_run=False, log_fn=None):
     """
     Scan all lessons, count pattern frequency, and auto-promote

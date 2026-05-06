@@ -19,6 +19,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from prefect import flow, task
+
 from core.runtime import (
     CAMPAIGN_STATUS,
     RUN_STATUS,
@@ -27,6 +29,12 @@ from core.runtime import (
     log,
 )
 from memory_pkg import load_campaigns, save_campaigns, vault_write_campaign_note
+from prefect_io.state_hooks import (
+    on_cancelled,
+    on_completion,
+    on_failure,
+    on_running,
+)
 
 _PAUSE_POLL_SECONDS = 5.0
 
@@ -97,6 +105,14 @@ def _is_paused(campaign_id: str) -> bool:
         return bool(CAMPAIGN_STATUS.get(campaign_id, {}).get("paused"))
 
 
+@flow(
+    name="campaign",
+    retries=0,
+    on_running=[on_running],
+    on_completion=[on_completion],
+    on_failure=[on_failure],
+    on_cancellation=[on_cancelled],
+)
 def run_campaign(campaign_id: str) -> None:
     """Daemon-thread entry. Sequentially expands the grid and runs each
     combo through ``run_orchestration``, persisting per-run records into
@@ -161,7 +177,7 @@ def run_campaign(campaign_id: str) -> None:
         )
 
         try:
-            run_orchestration(req, run_id)
+            run_orchestration.with_options(name=f"orchestrate-{run_id[:8]}")(req, run_id)
         except Exception as e:
             log(run_id, f"[campaign {campaign_id}] run crashed: {e}\n{traceback.format_exc()}")
 
@@ -178,7 +194,7 @@ def run_campaign(campaign_id: str) -> None:
         campaigns[campaign_id]["updated_at"] = _utcnow_iso()
         save_campaigns(campaigns)
         _safe_vault_write(campaigns[campaign_id])
-        _safe_emit_evidence(campaign_id)
+        _safe_emit_evidence.submit(campaign_id).result(raise_on_failure=False)
 
     _set_campaign_phase(campaign_id, final_status)
     with _campaign_status_lock:
@@ -194,6 +210,7 @@ def _safe_vault_write(campaign: dict) -> None:
         pass
 
 
+@task(name="emit_evidence", retries=2)
 def _safe_emit_evidence(campaign_id: str) -> None:
     """Best-effort evidence-bundle emission; never raises into the runner.
 
@@ -223,4 +240,4 @@ def _record_run(
     campaigns[campaign_id]["updated_at"] = _utcnow_iso()
     save_campaigns(campaigns)
     _safe_vault_write(campaigns[campaign_id])
-    _safe_emit_evidence(campaign_id)
+    _safe_emit_evidence.submit(campaign_id).result(raise_on_failure=False)

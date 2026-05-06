@@ -1,0 +1,23 @@
+# prefect.yaml — declares the orchestrate and campaign deployments.
+# Apply with: prefect deploy --all (run inside scripts/install_prefect_worker.sh).
+name: ai-orchestrator
+prefect-version: 3.0.0
+
+build: null
+push: null
+pull: null
+
+deployments:
+  - name: orchestrate
+    entrypoint: orchestration/__init__.py:run_orchestration
+    work_pool:
+      name: orchestrator-pool
+    schedule: null
+    parameters: {}
+
+  - name: campaign
+    entrypoint: orchestration/campaign.py:run_campaign
+    work_pool:
+      name: orchestrator-pool
+    schedule: null
+    parameters: {}

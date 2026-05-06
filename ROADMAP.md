@@ -106,19 +106,50 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       --crate-dir`) — pure stdlib + PyNaCl, no orchestrator runtime needed
 - [x] 32 new tests (schema, rocrate, signing, calculators, e2e); 71/71 green
 - [ ] *Deferred to 1.2.1*: HTML viewer (Snakemake-style single-page)
-- [ ] *Deferred to 1.2.x*: per-LLM-call telemetry capture (rendered messages,
-      sampling, response_tokens populated per call); schema already accepts
-      it, the orchestration loop just doesn't capture at that grain yet
+- [x] *Closed in 1.3 (Scope α)*: per-LLM-call telemetry capture — `LLM_CALL_LOG`
+      buffer populated by Prefect `on_task_completion` state hook for tasks
+      tagged `"llm-call"`; drained per run in `evidence/builder.py` into
+      `RunRecord.llm_calls`. Scope β (citation-grade fidelity for `call_id`,
+      `role`, `target.host`, `response_text`, `started_at`) tracked at
+      `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`.
 - [ ] *Deferred to Phase 2*: self-hosted Sigstore (Fulcio + Rekor) —
       DSSE envelope abstracts trust root, older bundles stay verifiable
 
-### 1.3 Prefect 3.x integration
-- [ ] Install Prefect in a new LXC
-- [ ] Wrap `run_orchestration` as a Prefect flow
-- [ ] Subflows for generator parallelism, optimizer, troubleshooter
-- [ ] Configure retries (3 attempts, exponential backoff)
-- [ ] Use Prefect's resume-after-crash for control-flow state
-- [ ] Document handoff in ARCHITECTURE.md
+### 1.3 Prefect 3.x integration — DONE (branch `feat/prefect-integration`, PR #4)
+- [x] Prefect 3.6.29 server on dedicated LXC 201 (`prefect-server`,
+      LAN 192.168.2.182, Tailscale 100.76.57.6)
+- [x] `run_orchestration` and `run_campaign` wrapped as `@flow`; agent
+      functions (`planner_agent`, `judge_score`, `generate_candidate`,
+      `optimizer_agent`, `troubleshoot`) wrapped as `@task`
+- [x] Generator parallelism via `generate_candidate.map(...)` (replaces the
+      prior `ThreadPoolExecutor` block); `unmapped()` for dict args because
+      Prefect 3.x iterates dicts by default
+- [x] Retries — flow-level `run_orchestration(retries=1, retry_delay_seconds=60)`,
+      memory/evidence helper tasks `retries=2`, agent tasks `retries=0`
+      (the troubleshoot loop already retries from the orchestration side)
+- [x] Two execution modes via `config.json` `prefect.execution_mode`:
+      `in_process` (default, daemon-thread runs the @flow) and `deployment`
+      (worker pulls from `orchestrator-pool` via systemd `prefect-worker.service`)
+- [x] Server-down fallback to daemon-thread spawn (`.fn` invocation) when
+      Prefect API unreachable; inline `_update_run_status(...)` calls preserved
+      so the WebSocket UI stays alive on this path
+- [x] Real `flow_run_id` captured via `on_running` state hook into
+      `RUN_STATUS`/`CAMPAIGN_STATUS` (replaces the earlier fake-UUID issue
+      that made pause/resume/cancel silently no-op)
+- [x] State hooks drive `RUN_STATUS`/`CAMPAIGN_STATUS` updates AND populate
+      `LLM_CALL_LOG` for evidence-bundle telemetry (closes deferred 1.2.x item)
+- [x] 11 new tests (95 → 103) plus 3 real-server tests gated by `prefect_real`
+      pytest marker; CI `prefect-integration` job spins up a Prefect server
+      in a background step and runs `pytest -m prefect_real`
+- [x] Docs: ARCHITECTURE.md (submission flow + execution modes + topology),
+      RUNBOOK.md (Prefect ops procedures), CLAUDE.md (module layout + EXISTS)
+- [ ] *Deferred (Scope β)*: citation-grade `LlmCall` fidelity — capture
+      `call_id`/`role`/`target.host`/`response_text`/`started_at` at the
+      state-hook level instead of the current placeholders. Tracked at
+      `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`
+- [ ] *Deferred (operational)*: install Tailscale on orchestrator LXC 200
+      so `prefect.api_url` can move from LAN IP to tailnet — script staged at
+      `root@192.168.2.13:/root/install_ts_lxc200.sh`
 
 ### 1.4 DVC on TrueNAS
 - [ ] `pip install dvc[ssh]`

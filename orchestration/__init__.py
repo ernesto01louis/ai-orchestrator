@@ -15,12 +15,15 @@ import subprocess
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
 import requests
 from pydantic import BaseModel
+from prefect import flow, task, unmapped
+from prefect_io.state_hooks import (
+    on_running, on_completion, on_failure, on_cancelled,
+)
 
 from agents.loader import load_agent
 from core.config import (
@@ -584,6 +587,7 @@ class OrchestrateRequest(BaseModel):
 
 
 
+@task(name="planner_agent", retries=0)
 def planner_agent(prompt, model, env, memory_context, run_id):
 
     # Load planner agent config from agents/planner/
@@ -608,7 +612,7 @@ def planner_agent(prompt, model, env, memory_context, run_id):
         PLAN_SCHEMA,
         resolve_chat_url(model),
         run_id
-    )
+    ).parsed
 
     if result:
 
@@ -656,7 +660,7 @@ def planner_agent(prompt, model, env, memory_context, run_id):
     # fallback: use /api/generate without schema enforcement
     log(run_id, "structured planner failed, falling back to unstructured")
 
-    raw = query_ollama(model, user_prompt, OLLAMA_PLANNER, run_id)
+    raw = query_ollama(model, user_prompt, OLLAMA_PLANNER, run_id).text
 
     parsed = safe_parse_json(raw, run_id, context="planner fallback")
 
@@ -696,6 +700,7 @@ def planner_agent(prompt, model, env, memory_context, run_id):
 # JUDGE (structured output)
 # ------------------------------------------------
 
+@task(name="judge_score", retries=0)
 def judge_score(files, prompt, plan, model, run_id):
 
     file_list = ", ".join(files.keys())
@@ -726,7 +731,7 @@ def judge_score(files, prompt, plan, model, run_id):
             JUDGE_SCHEMA,
             resolve_chat_url(model),
             run_id
-        )
+        ).parsed
 
         if result and isinstance(result, dict):
             overall = result.get("overall", 0)
@@ -741,7 +746,7 @@ def judge_score(files, prompt, plan, model, run_id):
         # fallback: unstructured
         log(run_id, "structured judge failed, falling back to unstructured")
 
-        raw = query_ollama(model, user_prompt, OLLAMA_JUDGE, run_id)
+        raw = query_ollama(model, user_prompt, OLLAMA_JUDGE, run_id).text
 
         parsed = safe_parse_json(raw, run_id, context="judge fallback")
 
@@ -770,7 +775,7 @@ def judge_score(files, prompt, plan, model, run_id):
             JUDGE_SCHEMA,
             OLLAMA_MAIN_CHAT,
             run_id
-        )
+        ).parsed
 
         if result and isinstance(result, dict):
             overall = result.get("overall", 0)
@@ -781,7 +786,7 @@ def judge_score(files, prompt, plan, model, run_id):
             log(run_id, f"fallback judge score: {overall}")
             return overall, result
 
-        raw = query_ollama(JUDGE_FALLBACK_MODEL, user_prompt, resolve_generate_url(JUDGE_FALLBACK_MODEL), run_id)
+        raw = query_ollama(JUDGE_FALLBACK_MODEL, user_prompt, resolve_generate_url(JUDGE_FALLBACK_MODEL), run_id).text
         parsed = safe_parse_json(raw, run_id, context="fallback judge")
         if parsed and isinstance(parsed, dict):
             overall = parsed.get("overall", 0)
@@ -800,6 +805,7 @@ def judge_score(files, prompt, plan, model, run_id):
 # GENERATOR (free-form code output)
 # ------------------------------------------------
 
+@task(name="generate_candidate", retries=0)
 def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, tool_context=""):
 
     log(run_id, f"generator start -> {model}")
@@ -849,7 +855,7 @@ def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, to
         file_descriptions=file_descriptions,
     )
 
-    raw = query_ollama(model, gen_prompt, resolve_generate_url(model), run_id)
+    raw = query_ollama(model, gen_prompt, resolve_generate_url(model), run_id).text
 
     files = extract_files(raw, plan)
 
@@ -871,7 +877,7 @@ def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, to
             "judge": {"verification_errors": errors}
         }
 
-    score, judge = judge_score(files, prompt, plan, judge_model, run_id)
+    score, judge = judge_score.submit(files, prompt, plan, judge_model, run_id).result()
 
     return {
         "model": model,
@@ -885,6 +891,7 @@ def generate_candidate(model, prompt, plan, env, judge_model, target, run_id, to
 # OPTIMIZER
 # ------------------------------------------------
 
+@task(name="optimizer_agent", retries=0)
 def optimizer_agent(files, prompt, judge, plan, model, run_id):
 
     if not model:
@@ -909,7 +916,7 @@ def optimizer_agent(files, prompt, judge, plan, model, run_id):
             improvements=improve,
             code=files[filename],
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         code = extract_code(raw)
         if code:
             return {filename: code}
@@ -924,7 +931,7 @@ def optimizer_agent(files, prompt, judge, plan, model, run_id):
             formatted_files=formatted,
             entrypoint=entrypoint,
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         result = extract_files(raw, plan)
         return result if result else files
 
@@ -933,6 +940,7 @@ def optimizer_agent(files, prompt, judge, plan, model, run_id):
 # TROUBLESHOOTER
 # ------------------------------------------------
 
+@task(name="troubleshoot", retries=0)
 def troubleshoot(files, error, prompt, plan, model, run_id):
 
     if not model:
@@ -956,7 +964,7 @@ def troubleshoot(files, error, prompt, plan, model, run_id):
             error=error,
             code=files[filename],
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         code = extract_code(raw)
         if code:
             return {filename: code}
@@ -971,7 +979,7 @@ def troubleshoot(files, error, prompt, plan, model, run_id):
             error=error,
             formatted_files=formatted,
         )
-        raw = query_ollama(model, p, resolve_generate_url(model), run_id)
+        raw = query_ollama(model, p, resolve_generate_url(model), run_id).text
         result = extract_files(raw, plan)
         return result if result else files
 
@@ -980,6 +988,15 @@ def troubleshoot(files, error, prompt, plan, model, run_id):
 # ORCHESTRATOR CORE
 # ------------------------------------------------
 
+@flow(
+    name="orchestrate",
+    retries=1,
+    retry_delay_seconds=60,
+    on_running=[on_running],
+    on_completion=[on_completion],
+    on_failure=[on_failure],
+    on_cancellation=[on_cancelled],
+)
 def run_orchestration(req: OrchestrateRequest, run_id: str):
 
     try:
@@ -1016,7 +1033,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             ref_names = ", ".join(req.reference_files)
             memory_context += f"\n\nATTACHED REFERENCE DOCUMENTS: {ref_names}\nThe generator will receive the full content of these documents. Plan accordingly — the user has provided these as context for the task."
 
-        plan = planner_agent(req.prompt, req.planner_model, env, memory_context, run_id)
+        plan = planner_agent.submit(req.prompt, req.planner_model, env, memory_context, run_id).result()
 
         language = plan.get("language", "python").lower()
         project_type = plan.get("project_type", "script")
@@ -1111,35 +1128,31 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             score_at_iter_start = best_score
             log(run_id, f"generation iteration {i+1}")
 
-            with ThreadPoolExecutor(max_workers=len(req.generator_models)) as ex:
+            # combine tool context and reference documents for generator
+            combined_context = tool_context
+            if ref_context:
+                combined_context = (combined_context + "\n" + ref_context) if combined_context else ref_context
 
-                # combine tool context and reference documents for generator
-                combined_context = tool_context
-                if ref_context:
-                    combined_context = (combined_context + "\n" + ref_context) if combined_context else ref_context
+            # Prefect .map() distributes one task run per generator model.
+            # plan and env are dicts; wrap with unmapped() so they're broadcast
+            # as scalars instead of iterated over their keys.
+            futures = generate_candidate.map(
+                model=req.generator_models,
+                prompt=req.prompt,
+                plan=unmapped(plan),
+                env=unmapped(env),
+                judge_model=req.judge_model,
+                target=req.deploy_target,
+                run_id=run_id,
+                tool_context=combined_context,
+            )
 
-                futures = {
-                    ex.submit(
-                        generate_candidate,
-                        model,
-                        req.prompt,
-                        plan,
-                        env,
-                        req.judge_model,
-                        req.deploy_target,
-                        run_id,
-                        combined_context
-                    ): model
-                    for model in req.generator_models
-                }
-
-                candidates = []
-                for future in as_completed(futures):
-                    try:
-                        candidates.append(future.result())
-                    except Exception as e:
-                        model_name = futures[future]
-                        log(run_id, f"generator failed for {model_name}: {e}")
+            candidates = []
+            for fut, model in zip(futures, req.generator_models):
+                try:
+                    candidates.append(fut.result())
+                except Exception as e:
+                    log(run_id, f"generator failed for {model}: {e}")
 
             candidates.sort(key=lambda x: x["score"], reverse=True)
 
@@ -1171,14 +1184,14 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             if not best_judge:
                 log(run_id, "no judge feedback available, skipping optimizer")
             else:
-                optimized_files = optimizer_agent(
+                optimized_files = optimizer_agent.submit(
                     best_files,
                     req.prompt,
                     best_judge,
                     plan,
                     req.optimizer_model,
                     run_id
-                )
+                ).result()
 
                 if optimized_files and optimized_files != best_files:
 
@@ -1186,13 +1199,13 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
                     if all_passed:
 
-                        opt_score, opt_judge = judge_score(
+                        opt_score, opt_judge = judge_score.submit(
                             optimized_files,
                             req.prompt,
                             plan,
                             req.judge_model,
                             run_id
-                        )
+                        ).result()
 
                         log(run_id, f"optimizer score {opt_score} (was {best_score})")
 
@@ -1224,7 +1237,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             if not models_tried:
                 models_tried = req.generator_models
 
-            update_negative_memory(
+            update_negative_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1234,7 +1247,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 failure_stage="generation",
                 models_tried=models_tried,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
 
             _update_run_status(run_id, completed=True, error="All generators failed to produce valid code")
 
@@ -1264,14 +1277,14 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
             log(run_id, f"troubleshoot attempt {troubleshoot_attempt}/{MAX_TROUBLESHOOT_ATTEMPTS}")
 
-            fixed_files = troubleshoot(
+            fixed_files = troubleshoot.submit(
                 best_files,
                 execution["stderr"],
                 req.prompt,
                 plan,
                 req.troubleshooter_model,
                 run_id
-            )
+            ).result()
 
             if not fixed_files or fixed_files == best_files:
                 log(run_id, "troubleshooter returned unchanged code, stopping")
@@ -1354,7 +1367,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
         if execution["returncode"] == 0:
             # positive memory
-            update_memory(
+            update_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1365,10 +1378,10 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 winning_model=best_model,
                 troubleshoot_attempts=troubleshoot_attempt,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
         else:
             # still record in positive memory (with success=False) for similarity matching
-            update_memory(
+            update_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1379,7 +1392,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 winning_model=best_model,
                 troubleshoot_attempts=troubleshoot_attempt,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
 
             # negative memory — record what went wrong
             error_summary = execution.get("stderr", "")[:500]
@@ -1392,7 +1405,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
 
             models_tried = list(set(c.get("model", "") for c in all_candidate_results if c.get("model")))
 
-            update_negative_memory(
+            update_negative_memory.submit(
                 prompt=req.prompt,
                 embedding=emb,
                 run_id=run_id,
@@ -1402,12 +1415,12 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 failure_stage=failure_stage,
                 models_tried=models_tried,
                 project_type=project_type
-            )
+            ).result(raise_on_failure=False)
 
         # rewrite primer.md with current state (Layer 2)
         env_summary = f"Target: {req.deploy_target}, Python: {env.get('python', '?')}, Node: {env.get('node', '?')}"
         try:
-            rewrite_primer(
+            rewrite_primer.submit(
                 run_id=run_id,
                 project_name=req.project_name,
                 language=language,
@@ -1422,13 +1435,13 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 troubleshoot_attempts=troubleshoot_attempt,
                 winning_model=best_model,
                 env_summary=env_summary
-            )
+            ).result(raise_on_failure=False)
         except Exception as e:
             log(run_id, f"primer rewrite failed (non-fatal): {e}")
 
         # record session (groups runs within time windows)
         try:
-            session_id = record_session(
+            session_id = record_session.submit(
                 run_id=run_id,
                 project_name=req.project_name,
                 prompt=req.prompt,
@@ -1437,7 +1450,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 success=execution["returncode"] == 0,
                 winning_model=best_model,
                 troubleshoot_attempts=troubleshoot_attempt
-            )
+            ).result(raise_on_failure=False)
             log(run_id, f"session: {session_id}")
         except Exception as e:
             log(run_id, f"session recording failed (non-fatal): {e}")
@@ -1462,7 +1475,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                     target=req.deploy_target,
                     plan=plan
                 )
-                hindsight_retain(retain_content, run_id)
+                hindsight_retain.submit(retain_content, run_id).result(raise_on_failure=False)
             except Exception as e:
                 log(run_id, f"hindsight retain failed (non-fatal): {e}")
 
@@ -1489,7 +1502,7 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
         # write vault notes (L5)
         _run_elapsed_vault = _run_elapsed if '_run_elapsed' in dir() else int(time.time() - _run_start_time)
         try:
-            vault_after_run(
+            vault_after_run.submit(
                 run_id=run_id, project_name=req.project_name, prompt=req.prompt,
                 language=language, project_type=project_type, score=best_score,
                 success=execution["returncode"] == 0, winning_model=best_model,
@@ -1497,13 +1510,13 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 entrypoint=entrypoint, files=best_files, execution=execution,
                 deploy_path=deploy_path, target=req.deploy_target, plan=plan,
                 best_judge=best_judge, elapsed_seconds=_run_elapsed_vault
-            )
+            ).result(raise_on_failure=False)
         except Exception as e:
             log(run_id, f"vault write failed (non-fatal): {e}")
 
         # Gates: consolidate lessons at end of run
         try:
-            gate_report = consolidate_lessons(log_fn=log)
+            gate_report = consolidate_lessons.submit(log_fn=log).result(raise_on_failure=False)
             if gate_report.get("promoted_count", 0) > 0:
                 log(run_id, f"gates: {gate_report['promoted_count']} new rules auto-promoted")
         except Exception as e:

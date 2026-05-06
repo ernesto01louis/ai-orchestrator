@@ -72,6 +72,7 @@ from gates import (
     consolidate_lessons, load_gates, save_gates, add_gate, remove_gate,
     toggle_gate, get_gates_summary, get_lessons_summary, load_all_lessons,
 )
+from prefect_io import _healthcheck
 
 app = FastAPI()
 
@@ -92,6 +93,11 @@ async def _lifespan(app_instance):
     # Capture the running event loop so background threads can post coroutines
     # back via asyncio.run_coroutine_threadsafe (used by _ws_broadcast).
     set_main_loop(asyncio.get_running_loop())
+    try:
+        if not _healthcheck():
+            print("WARNING: Prefect server unreachable at startup; new runs will use daemon-thread fallback until it returns")
+    except Exception as e:
+        print(f"WARNING: Prefect server healthcheck failed at startup: {e}")
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield

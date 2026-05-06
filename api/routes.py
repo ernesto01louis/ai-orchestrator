@@ -11,7 +11,6 @@ import json
 import os
 import re
 import shlex
-import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +73,7 @@ from core.runtime import (
     _campaign_status_lock,
     _init_run_status,
     _load_run_index,
+    _run_status_lock,
     _ws_clients,
     _ws_lock,
     log,
@@ -137,7 +137,13 @@ from orchestration import (
     get_available_models,
     get_loaded_models,
     get_orchestrator_health,
-    run_orchestration,
+)
+from prefect_io import (
+    cancel_flow_run,
+    pause_flow_run,
+    resume_flow_run,
+    submit_campaign,
+    submit_orchestration,
 )
 from references_pkg import (
     MAX_REFERENCE_UPLOAD_BYTES,
@@ -173,17 +179,18 @@ def orchestrate(req: OrchestrateRequest):
 
     _init_run_status(run_id, project=req.project_name, target=req.deploy_target)
 
-    thread = threading.Thread(
-        target=run_orchestration,
-        args=(req, run_id),
-        daemon=True
-    )
-    thread.start()
+    result = submit_orchestration(req, run_id)
+
+    # Keep flow_run_id alongside RUN_STATUS so pause/resume/cancel can target it.
+    with _run_status_lock:
+        if run_id in RUN_STATUS:
+            RUN_STATUS[run_id]["flow_run_id"] = result["flow_run_id"]
 
     return {
         "run_id": run_id,
+        "flow_run_id": result["flow_run_id"],
         "status": "started",
-        "poll": f"/status/{run_id}"
+        "poll": f"/status/{run_id}",
     }
 
 
@@ -201,6 +208,9 @@ def status(run_id: str):
         "score": info["score"],
         "completed": info["completed"],
     }
+
+    if info.get("flow_run_id"):
+        response["flow_run_id"] = info["flow_run_id"]
 
     if info.get("project"):
         response["project"] = info["project"]
@@ -1996,7 +2006,7 @@ def create_campaign(req: CampaignCreate):
         raise HTTPException(status_code=400, detail=str(e))
 
     # Lazy import to avoid circular at module load.
-    from orchestration.campaign import expand_grid, run_campaign
+    from orchestration.campaign import expand_grid
 
     campaign_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
@@ -2023,11 +2033,15 @@ def create_campaign(req: CampaignCreate):
             "current_run_id": None,
         }
 
-    thread = threading.Thread(target=run_campaign, args=(campaign_id,), daemon=True)
-    thread.start()
+    result = submit_campaign(campaign_id)
+
+    with _campaign_status_lock:
+        if campaign_id in CAMPAIGN_STATUS:
+            CAMPAIGN_STATUS[campaign_id]["flow_run_id"] = result["flow_run_id"]
 
     return {
         "campaign_id": campaign_id,
+        "flow_run_id": result["flow_run_id"],
         "run_count": len(combos),
         "status": "started",
         "poll": f"/campaigns/{campaign_id}",
@@ -2091,14 +2105,18 @@ def get_campaign_tree(campaign_id: str):
 def pause_campaign(campaign_id: str):
     _campaign_or_404(campaign_id)
     _set_campaign_flag(campaign_id, "paused", True)
-    return {"campaign_id": campaign_id, "paused": True}
+    flow_run_id = CAMPAIGN_STATUS.get(campaign_id, {}).get("flow_run_id")
+    pause_flow_run(flow_run_id)
+    return {"campaign_id": campaign_id, "paused": True, "flow_run_id": flow_run_id}
 
 
 @router.post("/campaigns/{campaign_id}/resume")
 def resume_campaign(campaign_id: str):
     _campaign_or_404(campaign_id)
     _set_campaign_flag(campaign_id, "paused", False)
-    return {"campaign_id": campaign_id, "paused": False}
+    flow_run_id = CAMPAIGN_STATUS.get(campaign_id, {}).get("flow_run_id")
+    resume_flow_run(flow_run_id)
+    return {"campaign_id": campaign_id, "paused": False, "flow_run_id": flow_run_id}
 
 
 @router.post("/campaigns/{campaign_id}/abort")
@@ -2108,7 +2126,9 @@ def abort_campaign(campaign_id: str):
     """
     _campaign_or_404(campaign_id)
     _set_campaign_flag(campaign_id, "aborted", True)
-    return {"campaign_id": campaign_id, "aborted": True}
+    flow_run_id = CAMPAIGN_STATUS.get(campaign_id, {}).get("flow_run_id")
+    cancel_flow_run(flow_run_id)
+    return {"campaign_id": campaign_id, "aborted": True, "flow_run_id": flow_run_id}
 
 
 # ------------------------------------------------
