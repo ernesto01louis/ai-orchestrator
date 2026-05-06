@@ -14,6 +14,7 @@ unreachable, after logging a WARNING and firing a Gotify notification.
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import threading
 from typing import Any
@@ -34,6 +35,18 @@ def _get_execution_mode() -> str:
 
 
 def _get_api_url() -> str:
+    """Resolve the Prefect REST API URL.
+
+    Order of precedence:
+      1. ``PREFECT_API_URL`` env var (overrides everything — required so
+         CI / containerised environments can point at a sidecar server
+         without writing a config.json).
+      2. ``config.json`` -> ``prefect.api_url`` (set during install).
+      3. ``http://127.0.0.1:4200/api`` (fallback when nothing is set).
+    """
+    env = os.environ.get("PREFECT_API_URL")
+    if env:
+        return env
     val = CONFIG.get("prefect", {}).get(
         "api_url", "http://127.0.0.1:4200/api"
     )
