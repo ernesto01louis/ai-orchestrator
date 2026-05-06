@@ -1,8 +1,38 @@
 # Phase J Scope β — LlmCall Citation-Grade Fidelity
 
-**Status:** Deferred (Scope α shipped in Phase J commit)
+**Status:** DONE 2026-05-06 on branch `feat/scope-beta-llm-call-fidelity`
+(3 commits, ~120 LOC, all 7 placeholders dropped).
 **Created:** 2026-05-06
 **Relates to:** `evidence/builder.py::_record_to_llm_call`, `core/llm_call_log.py`
+
+---
+
+## Resolution Summary (2026-05-06)
+
+All seven Scope α placeholders are now sourced from real runtime data:
+
+| LlmCall field | Captured by |
+|---|---|
+| `call_id` | `task_run.id` in `prefect_io.state_hooks.on_task_completion` |
+| `role` / `target.role` | new `agent_role` kwarg threaded through 12 call sites in `orchestration/__init__.py` + `tools/__init__.py`; coerced to the `LlmTarget` Literal in `_record_to_llm_call` (unknown values → `"generator"`) |
+| `target.host` | parsed from `task_run.parameters['url']` via `_host_from_url()` in `evidence/builder.py` |
+| `target.model_digest` / `target.model_size_bytes` | `_get_model_metadata()` in `llm/ollama.py` does a cached `/api/show` once per model and stamps the result into the `LlmResponse` envelope under `_orchestrator_*` keys; the state hook lifts them from `state.result().envelope` |
+| `response_text` | `_annotate_envelope()` in `llm/ollama.py` writes the response body into the envelope under `_orchestrator_response_text`; state hook reads it |
+| `started_at` | `task_run.start_time` in `on_task_completion` (was already accessed for duration_ms) |
+
+Tests added: 6 in `tests/test_ollama_metadata.py`, 1 in
+`tests/test_state_hooks.py`, 5 in `tests/test_evidence_llm_call_mapping.py`,
+plus 2 schema tests in `tests/test_llm_call_log.py`. Default suite: 117
+pass / 3 deselected (was 103 before Scope β).
+
+The legacy fallback path in `_record_to_llm_call` is kept on purpose: a
+record from before Scope β (no `agent_role`, no `server_url`, no
+`started_at`) still produces a valid `LlmCall` with sane defaults so
+mid-flight records during the upgrade don't break bundle build.
+
+---
+
+## Original spec (kept for posterity)
 
 ---
 

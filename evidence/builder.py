@@ -10,10 +10,13 @@ Pure repackaging — no new capture happens here. Phase 1.1's per-run
 artifact tree under ``projects/<name>/runs/<run_id>/`` is the source.
 
 Per-LLM-call telemetry (rendered messages, sampling, response tokens)
-is captured at a coarse grain in Phase 1.2; finer per-call audit logs
-land in a follow-up that touches the orchestration loop. The bundle
-schema already accepts ``LlmCall`` records — the field stays empty
-where the data isn't available yet rather than fabricating it.
+landed in Phase 1.2 at a coarse grain; Phase 1.3 Scope α drained
+``LLM_CALL_LOG`` into ``RunRecord.llm_calls[]`` with placeholder values
+for fields the runtime didn't yet capture. Scope β fills those fields
+directly from ``prefect_io.state_hooks`` so the bundle now records the
+real ``call_id`` (Prefect task-run UUID), ``agent_role``, ``host``,
+``model_digest`` (from cached /api/show), ``model_size_bytes``,
+``response_text``, and ``started_at`` for every LLM invocation.
 """
 from __future__ import annotations
 
@@ -27,6 +30,8 @@ import subprocess
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal, cast
+from urllib.parse import urlparse
 
 from core.campaign import Campaign
 from core.evidence import (
@@ -61,6 +66,22 @@ from evidence.signing import (
 from memory_pkg import load_campaigns
 
 CAMPAIGNS_OUTPUT_DIR = REPO_ROOT / "campaigns"
+
+
+def _host_from_url(url: str) -> str:
+    """Extract ``host:port`` from a full Ollama endpoint URL.
+
+    Falls back to ``"unknown"`` when the URL is empty (legacy LlmCallRecord
+    from before Scope β) or unparseable. Used by ``_record_to_llm_call`` to
+    populate ``LlmTarget.host``.
+    """
+    if not url:
+        return "unknown"
+    try:
+        netloc = urlparse(url).netloc
+    except (ValueError, TypeError):
+        netloc = ""
+    return netloc or "unknown"
 
 
 # ── public entry point ──────────────────────────────
@@ -187,51 +208,64 @@ class _BundleBuilder:
 
     # run-record assembly ----------------------------------------
 
+    _VALID_TARGET_ROLES = frozenset((
+        "planner", "judge", "generator", "optimizer",
+        "troubleshooter", "tool_dispatch",
+    ))
+
     @staticmethod
     def _record_to_llm_call(rec: LlmCallRecord) -> LlmCall:
-        """Phase J Scope α — best-effort mapping from runtime LlmCallRecord to bundle LlmCall.
+        """Phase J Scope β — direct mapping from runtime LlmCallRecord to bundle LlmCall.
 
-        Placeholders used (to be replaced in Scope β):
-        - ``call_id``: generated UUID (runtime does not yet assign a stable call ID).
-        - ``role``: hardcoded ``"generator"`` (followup will infer from rendered_messages).
-        - ``target.host``, ``target.model_digest``, ``target.model_size_bytes``:
-          stable placeholder strings/ints (runtime captures model name only).
-        - ``response_text``: empty string (state hook captures token count, not text body).
-        - ``started_at``: approximated as ``now() − duration_ms`` (Prefect task
-          start_time not yet threaded through to LlmCallRecord).
+        Scope α used placeholders for call_id / role / host / digest /
+        size / response_text / started_at because the runtime hook didn't
+        yet capture them. Scope β closes that gap: prefect_io.state_hooks
+        populates these fields via task_run.id, task_run.start_time, the
+        LlmResponse envelope (digest + size from /api/show, response body),
+        and an explicit `agent_role` kwarg on each query_ollama* call site.
 
-        Scope β work tracked at:
-          docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md
+        Fallbacks remain for legacy records (no `agent_role`, no server_url,
+        no started_at) so a partial record still produces a valid LlmCall —
+        validation never fails the build, only the citation-grade quality
+        of an individual call may degrade.
         """
-        # Build SamplingParams — temperature is required; default 0.0 if absent.
-        # SamplingParams.extra="allow" so unknown backend-specific keys are accepted
-        # automatically; no try/except needed.
         sampling = SamplingParams(
             temperature=float(rec.sampling.get("temperature", 0.0)),
             **{k: v for k, v in rec.sampling.items() if k != "temperature"},
         )
 
-        # Phase J α placeholder — LlmCallRecord carries model name only; host,
-        # digest, and size require Scope β instrumentation in state_hooks.py.
-        target = LlmTarget(
-            role="generator",  # placeholder — followup will infer from message roles
-            host="ollama-runtime-unknown",  # placeholder — Scope β reads from llm.ollama config
-            model_name=rec.model,
-            model_digest="sha256-placeholder-scope-beta",  # placeholder
-            model_size_bytes=0,  # placeholder
+        # LlmTarget.role is a Literal — coerce unknown / empty values to
+        # "generator" so Pydantic validation always passes. The cast tells
+        # mypy what the runtime check above already proves.
+        _LlmRole = Literal[
+            "planner", "judge", "generator", "optimizer",
+            "troubleshooter", "tool_dispatch",
+        ]
+        role: _LlmRole = cast(
+            _LlmRole,
+            rec.agent_role if rec.agent_role in _BundleBuilder._VALID_TARGET_ROLES else "generator",
         )
 
-        # Approximate started_at: subtract duration from now().  Prefect task
-        # start_time is available in the state hook but not yet propagated here.
-        started_at = datetime.now(timezone.utc) - timedelta(milliseconds=rec.duration_ms)
+        target = LlmTarget(
+            role=role,
+            host=_host_from_url(rec.server_url),
+            model_name=rec.model,
+            model_digest=rec.model_digest,
+            model_size_bytes=rec.model_size_bytes,
+        )
+
+        started_at = rec.started_at or (
+            datetime.now(timezone.utc) - timedelta(milliseconds=rec.duration_ms)
+        )
+        call_id = rec.call_id or str(uuid.uuid4())
 
         return LlmCall(
-            call_id=str(uuid.uuid4()),  # Phase J α: no stable call_id yet; Scope β generates at task-start hook
-            role="generator",  # Phase J α placeholder — Scope β infers from rendered_messages roles
+            call_id=call_id,
+            role=role,
             target=target,
             rendered_messages=rec.rendered_messages,
             sampling=sampling,
-            response_text="",  # Phase J α placeholder — Scope β captures via state hook result body
+            response_text=rec.response_text,
             response_tokens=rec.response_tokens,
             latency_ms=rec.duration_ms,
             started_at=started_at,
