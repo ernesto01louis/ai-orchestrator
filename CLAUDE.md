@@ -78,7 +78,11 @@ dream.py, gates.py,                      Already extracted, kept at root for com
 mcp_server.py
 campaigns/                               YAML templates + per-campaign evidence crates
 scripts/install_signing_key.sh           one-shot Ed25519 key setup
-tests/                                   pytest scaffold (71 tests)
+scripts/install_prefect.sh               LXC 201 bootstrap (Prefect server install).
+scripts/install_prefect_worker.sh        orchestrator-side bootstrap (registers deployments).
+prefect.yaml                             deployment manifest (orchestrate + campaign deployments).
+tests/                                   pytest scaffold (103 default + 3 prefect_real tests)
+tests/integration/                       Real-server integration tests (gated by prefect_real marker).
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data-flow diagram.
@@ -140,6 +144,18 @@ index, model stats with per-language/per-role/per-project-type tracking.
 **Reference documents (RAG):** PDF → markdown via pymupdf4llm with image
 description from a vision model when available.
 
+**Workflow engine (Phase 1.3 — DONE):**
+- Prefect 3.x server on dedicated LXC 201 (`prefect-server`, LAN 192.168.2.182, Tailscale 100.76.57.6)
+- `run_orchestration` and `run_campaign` are `@flow`-decorated; agent functions
+  are `@task`-decorated with `retries=2`/`retries=0` per role
+- Two execution modes: `in_process` (default, daemon-thread runs the flow) +
+  `deployment` (Prefect worker pulls from `orchestrator-pool`)
+- Server-down fallback: when Prefect API is unreachable, falls back to raw
+  daemon-thread spawn (`.fn` invocation) — no functional regression
+- State hooks drive `RUN_STATUS`/`CAMPAIGN_STATUS` updates AND populate
+  `LLM_CALL_LOG` for evidence-bundle telemetry (closes Phase 1.2.x deferred item, Scope α)
+- `prefect-integration` CI job spins up Prefect 3 in a background step and runs `pytest -m prefect_real`
+
 **Operations:**
 - `.env`-based secrets (loaded via python-dotenv at startup)
 - WebSocket `/ws` with thread-safe broadcast (Phase 0.e fix)
@@ -168,14 +184,12 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     RO-Crate 1.2 / WRROC bundles with in-toto + SLSA + DSSE attestation,
     REFORMS + NeurIPS checklists, Model Cards, Datasheets, pluggable
     calculators, Ed25519 signing
-1.3 Prefect 3.x as workflow engine — IN PROGRESS (Phases A–H done; I/J/K
-    remaining). Branch `feat/prefect-integration` not yet merged. Prefect
-    server lives on dedicated LXC 201 (`prefect-server`, LAN
-    192.168.2.182, tailnet 100.76.57.6). Orchestrator's `config.json`
-    points `prefect.api_url` at the LAN IP; Tailscale on LXC 200 is a
-    deferred follow-up. `execution_mode` defaults to `in_process`
-    (worker systemd unit installed but not started until we switch to
-    `deployment` mode).
+1.3 Prefect 3.x as workflow engine — DONE (Phases A–J complete; branch
+    `feat/prefect-integration` pending merge). Prefect server on LXC 201
+    (`prefect-server`, LAN 192.168.2.182, tailnet 100.76.57.6).
+    `execution_mode` defaults to `in_process`; `deployment` mode requires
+    starting the systemd worker. Scope β (citation-grade LlmCall fidelity)
+    deferred — tracked in `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`.
 1.4 DVC on TrueNAS for data versioning
 1.5 SHA256 artifact manifests
 1.6 **Python client library** (separate `ai-orchestrator-client` package)
@@ -228,7 +242,7 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-05, Phase 1.3 H complete (Prefect server LXC live,
-deployments registered, end-to-end smoke green). When you complete a
+*Last updated: 2026-05-06, Phase 1.3 A–J complete (Prefect integration done,
+branch `feat/prefect-integration` pending merge). When you complete a
 phase or significantly change architecture, update this file before
 starting the next work item.*

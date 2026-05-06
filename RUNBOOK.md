@@ -153,3 +153,69 @@ auto-skip if `/health` is unreachable.
 - **Vault sync failures** → SSH key path in `config.json` must match
   what's on the Hindsight host (192.168.2.203). Tail
   `journalctl -u ai-orchestrator | grep vault`.
+
+## Prefect operations (Phase 1.3)
+
+### Topology
+- Prefect server: LXC 201 (`prefect-server`), LAN 192.168.2.182:4200, Tailscale 100.76.57.6:4200
+- Orchestrator: LXC 200 (`ai-orchestrator`), LAN 192.168.2.* — `config.json` `prefect.api_url` points at the Prefect LAN IP
+- Worker (deployment mode only): `prefect-worker.service` on LXC 200 — installed by `scripts/install_prefect_worker.sh` but `enabled` only; `start` it manually when switching to deployment mode
+
+### Healthchecks
+```bash
+# From the orchestrator host
+curl -fsS http://192.168.2.182:4200/api/health && echo OK
+# On the orchestrator LXC
+PREFECT_API_URL=http://192.168.2.182:4200/api venv/bin/python -c \
+  "from prefect_io import _healthcheck; print(_healthcheck())"
+# Run real-server tests
+PREFECT_API_URL=http://192.168.2.182:4200/api venv/bin/pytest -q -m prefect_real
+```
+
+### Restarting the Prefect server
+```bash
+ssh root@192.168.2.13 "pct exec 201 -- systemctl restart prefect-server.service"
+```
+
+### Switching to deployment mode (on the orchestrator LXC)
+```bash
+# 1. Start the worker
+systemctl start prefect-worker.service
+# 2. Edit config
+#    Set "prefect.execution_mode": "deployment" in /opt/ai-orchestrator/config.json
+# 3. Restart the orchestrator
+systemctl restart ai-orchestrator
+```
+
+### Switching back to in_process mode
+```bash
+# 1. Edit config
+#    Set "prefect.execution_mode": "in_process" in /opt/ai-orchestrator/config.json
+# 2. Restart the orchestrator
+systemctl restart ai-orchestrator
+# 3. Stop the worker (optional; idle worker is harmless)
+systemctl stop prefect-worker.service
+```
+
+### Re-registering deployments after code changes
+```bash
+cd /opt/ai-orchestrator
+PREFECT_API_URL=http://192.168.2.182:4200/api venv/bin/prefect deploy --all
+```
+
+### Flushing the SQLite database (rare, e.g. corruption)
+```bash
+ssh root@192.168.2.13 "pct exec 201 -- bash -c '
+    systemctl stop prefect-server
+    rm -f /var/lib/prefect/prefect.db
+    systemctl start prefect-server
+'"
+# Then re-register deployments from the orchestrator (see above)
+```
+
+### Server-down behavior
+- Logs at orchestrator: "Prefect server unreachable; using daemon-thread fallback"
+- `_healthcheck()` returns False at startup → printed warning to stdout
+- Runs continue without Prefect UI tracking until server returns
+- WebSocket UI keeps working because inline `_update_run_status(...)` calls
+  in `run_orchestration`/`run_campaign` are preserved as belt-and-suspenders
