@@ -194,7 +194,7 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     `response_text`, and `started_at`.
 1.4 DVC on TrueNAS — IN PROGRESS (branch `feat/dvc-truenas`). DVC client
     + remote scaffolded on the orchestrator LXC; remote points at
-    `ssh://dvc-orchestrator@192.168.2.222/mnt/tank/orchestrator-dvc` over
+    `ssh://dvc-orchestrator@192.168.2.222/mnt/f3/orchestrator-dvc` over
     a dedicated TrueNAS user. Helper at `scripts/dvc_track.sh`. End-to-end
     `dvc push` blocked on TrueNAS-side provisioning (SSH service + user +
     dataset). See `RUNBOOK.md` "Data versioning with DVC" for full setup.
