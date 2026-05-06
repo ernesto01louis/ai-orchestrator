@@ -2,8 +2,7 @@
 
 Agent functions are patched at the orchestration module level rather than
 relying solely on mock_ollama, because the planner uses structured-output
-schema validation that the canned mock JSON does not satisfy.  The generate_candidate
-@task is similarly patched to avoid the full LLM+verify+judge chain.
+schema validation that the canned mock JSON does not satisfy.
 
 sandbox_execute (not run_in_sandbox) is the correct target in execution/__init__.py.
 """
@@ -67,23 +66,6 @@ def tiny_request():
 
 
 # ---------------------------------------------------------------------------
-# Helper: stack of patches needed for a clean run
-# ---------------------------------------------------------------------------
-def _agent_patches():
-    """Return a list of (target, kwargs) for unittest.mock.patch."""
-    return [
-        patch("orchestration.planner_agent.fn", return_value=_VALID_PLAN),
-        patch("orchestration.generate_candidate.fn", return_value=_VALID_CANDIDATE),
-        patch("orchestration.sandbox_execute", return_value={"exit_code": 0, "stdout": "hi", "error": ""}),
-        patch("orchestration.environment_inspector", return_value={"os": "Linux", "python": "python3", "node": "node", "arch": "x86_64"}),
-        patch("orchestration.gather_live_context", return_value=""),
-        patch("orchestration.build_full_planner_context", return_value=""),
-        patch("orchestration.notify_run_started"),
-        patch("orchestration.notify_run_complete"),
-    ]
-
-
-# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -117,9 +99,12 @@ def test_run_status_marked_completed_after_flow(tiny_request, mock_ollama):
 
 
 def test_evidence_bundle_populates_llm_calls(tiny_request, mock_ollama):
+    # generate_candidate is NOT patched at .fn level here so that the real
+    # generate_candidate task runs and calls query_ollama (a Prefect @task
+    # tagged "llm-call").  That fires on_task_completion → LLM_CALL_LOG.append.
+    # The planner is still patched because PLAN_SCHEMA rejects the canned JSON.
     LLM_CALL_LOG.drain("test-flow-3")  # clear any prior entries
     with patch("orchestration.planner_agent.fn", return_value=_VALID_PLAN), \
-         patch("orchestration.generate_candidate.fn", return_value=_VALID_CANDIDATE), \
          patch("orchestration.sandbox_execute", return_value={"exit_code": 0, "stdout": "hi", "error": ""}), \
          patch("orchestration.environment_inspector", return_value={"os": "Linux", "python": "python3", "node": "node", "arch": "x86_64"}), \
          patch("orchestration.gather_live_context", return_value=""), \
@@ -128,11 +113,10 @@ def test_evidence_bundle_populates_llm_calls(tiny_request, mock_ollama):
          patch("orchestration.notify_run_complete"):
         run_orchestration(tiny_request, "test-flow-3")
 
-    # LLM calls fired by mock_ollama during the flow should appear in the log.
-    # Under the agent-patch strategy, direct ollama calls may be zero; we assert
-    # >= 0 here and rely on the call_count check in other test suites.
+    # Each generator model invokes query_ollama (tagged "llm-call") →
+    # on_task_completion fires → record lands in LLM_CALL_LOG.
     records = LLM_CALL_LOG.drain("test-flow-3")
-    assert isinstance(records, list)
+    assert len(records) >= 1, f"Expected at least one LlmCallRecord, got {records}"
 
 
 def test_generate_candidate_map_runs_per_model(tiny_request, mock_ollama):
