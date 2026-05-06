@@ -132,7 +132,7 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
         if not run_id:
             return
 
-        # Best-effort duration calc
+        # Best-effort duration calc + start_time pass-through
         start = getattr(task_run, "start_time", None)
         end = getattr(task_run, "end_time", None)
         duration_ms = 0
@@ -149,19 +149,43 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             rendered = [{"role": "user", "content": rendered}]
         sampling = params.get("options") or params.get("sampling") or {}
 
-        # Try to extract response_tokens from result
+        # Phase J β citation-grade fields ---
+        call_id = str(getattr(task_run, "id", "") or "")
+        server_url = str(params.get("url", "") or "")
+        agent_role = str(params.get("agent_role", "") or "")
+        started_at = start if hasattr(start, "tzinfo") else None
+
+        # Pull eval_count / digest / size / response_text from the LlmResponse
+        # envelope. Tolerate dicts (legacy callers / fixtures) and bare values.
         response_tokens = 0
+        envelope: dict[str, Any] = {}
         try:
             result = state.result(raise_on_failure=False) if callable(
                 getattr(state, "result", None)
             ) else None
-            # LlmResponse exposes .eval_count; legacy dict has "eval_count" key.
+            env_attr = getattr(result, "envelope", None)
+            if isinstance(env_attr, dict):
+                envelope = env_attr
+            elif isinstance(result, dict):
+                envelope = result
             candidate = getattr(result, "eval_count", None)
-            if candidate is None and isinstance(result, dict):
-                candidate = result.get("eval_count") or result.get("response_tokens")
+            if candidate is None:
+                candidate = envelope.get("eval_count") or envelope.get("response_tokens")
             response_tokens = int(candidate or 0)
         except Exception:
             response_tokens = 0
+            envelope = {}
+
+        model_digest = str(envelope.get("_orchestrator_digest", "") or "")
+        try:
+            model_size_bytes = int(envelope.get("_orchestrator_size_bytes", 0) or 0)
+        except (TypeError, ValueError):
+            model_size_bytes = 0
+        response_text = str(envelope.get("_orchestrator_response_text", "") or "")
+        # If caller didn't pass agent_role at the call site, fall back to the
+        # value the production code stamped into the envelope.
+        if not agent_role:
+            agent_role = str(envelope.get("_orchestrator_agent_role", "") or "")
 
         LLM_CALL_LOG.append(LlmCallRecord(
             run_id=run_id,
@@ -170,6 +194,13 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             sampling=sampling,
             response_tokens=int(response_tokens),
             duration_ms=int(duration_ms),
+            call_id=call_id,
+            agent_role=agent_role,
+            server_url=server_url,
+            model_digest=model_digest,
+            model_size_bytes=model_size_bytes,
+            response_text=response_text,
+            started_at=started_at,
         ))
     except Exception as e:
         logger.warning("on_task_completion hook error: %s", e)
