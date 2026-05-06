@@ -25,7 +25,7 @@ import shutil
 import socket
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.campaign import Campaign
@@ -34,9 +34,12 @@ from core.evidence import (
     CodeFingerprint,
     EvidenceBundle,
     HardwareFingerprint,
+    LlmCall,
     LlmTarget,
     RunRecord,
+    SamplingParams,
 )
+from core.llm_call_log import LLM_CALL_LOG, LlmCallRecord
 from core.paths import LOG_DIR, PROJECTS_DIR, REPO_ROOT
 from evidence import get_plugin_manager
 from evidence.checklists import (
@@ -184,6 +187,63 @@ class _BundleBuilder:
 
     # run-record assembly ----------------------------------------
 
+    @staticmethod
+    def _record_to_llm_call(rec: LlmCallRecord) -> LlmCall:
+        """Phase J Scope α — best-effort mapping from runtime LlmCallRecord to bundle LlmCall.
+
+        Placeholders used (to be replaced in Scope β):
+        - ``call_id``: generated UUID (runtime does not yet assign a stable call ID).
+        - ``role``: hardcoded ``"generator"`` (followup will infer from rendered_messages).
+        - ``target.host``, ``target.model_digest``, ``target.model_size_bytes``:
+          stable placeholder strings/ints (runtime captures model name only).
+        - ``response_text``: empty string (state hook captures token count, not text body).
+        - ``started_at``: approximated as ``now() − duration_ms`` (Prefect task
+          start_time not yet threaded through to LlmCallRecord).
+
+        Scope β work tracked at:
+          docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md
+        """
+        # Build SamplingParams — temperature is required; fall back to 0.0 if absent
+        # (rec.sampling may be empty or contain backend-specific keys not in the schema).
+        try:
+            sampling = SamplingParams(**rec.sampling)
+        except Exception:
+            # Phase J α: if sampling dict is missing temperature or has incompatible
+            # keys, fall back to a deterministic default rather than failing the build.
+            sampling = SamplingParams(
+                temperature=float(rec.sampling.get("temperature", 0.0)),
+                top_p=rec.sampling.get("top_p"),  # type: ignore[arg-type]
+                top_k=rec.sampling.get("top_k"),  # type: ignore[arg-type]
+                seed=rec.sampling.get("seed"),  # type: ignore[arg-type]
+                num_ctx=rec.sampling.get("num_ctx"),  # type: ignore[arg-type]
+            )
+
+        # Phase J α placeholder — LlmCallRecord carries model name only; host,
+        # digest, and size require Scope β instrumentation in state_hooks.py.
+        target = LlmTarget(
+            role="generator",  # placeholder — followup will infer from message roles
+            host="ollama-runtime-unknown",  # placeholder — Scope β reads from llm.ollama config
+            model_name=rec.model,
+            model_digest="sha256-placeholder-scope-beta",  # placeholder
+            model_size_bytes=0,  # placeholder
+        )
+
+        # Approximate started_at: subtract duration from now().  Prefect task
+        # start_time is available in the state hook but not yet propagated here.
+        started_at = datetime.now(timezone.utc) - timedelta(milliseconds=rec.duration_ms)
+
+        return LlmCall(
+            call_id=str(uuid.uuid4()),  # Phase J α: no stable call_id yet; Scope β generates at task-start hook
+            role="generator",  # Phase J α placeholder — Scope β infers from rendered_messages roles
+            target=target,
+            rendered_messages=rec.rendered_messages,
+            sampling=sampling,
+            response_text="",  # Phase J α placeholder — Scope β captures via state hook result body
+            response_tokens=rec.response_tokens,
+            latency_ms=rec.duration_ms,
+            started_at=started_at,
+        )
+
     def _build_run_records(self) -> list[RunRecord]:
         records: list[RunRecord] = []
         for run in self.campaign.runs:
@@ -214,7 +274,7 @@ class _BundleBuilder:
                 RunRecord(
                     run_id=run.run_id,
                     parameters=dict(run.params),
-                    llm_calls=[],  # finer per-call capture is a 1.2.x follow-up
+                    llm_calls=[self._record_to_llm_call(rec) for rec in LLM_CALL_LOG.drain(run.run_id)],
                     code_executions=code_executions,
                     metrics=metrics,
                     status=_run_status_to_record(run.status),
