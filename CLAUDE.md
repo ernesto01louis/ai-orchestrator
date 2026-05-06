@@ -81,6 +81,10 @@ scripts/install_signing_key.sh           one-shot Ed25519 key setup
 scripts/install_prefect.sh               LXC 201 bootstrap (Prefect server install).
 scripts/install_prefect_worker.sh        orchestrator-side bootstrap (registers deployments).
 prefect.yaml                             deployment manifest (orchestrate + campaign deployments).
+manifest/__init__.py                     Per-run + campaign SHA256 manifests with Merkle root,
+                                         verify-on-read helpers (Phase 1.5)
+cli/main.py                              orchestrator CLI (argparse): verify-run / verify-campaign
+                                         (Phase 1.5)
 tests/                                   pytest scaffold (103 default + 3 prefect_real tests)
 tests/integration/                       Real-server integration tests (gated by prefect_real marker).
 ```
@@ -167,6 +171,13 @@ description from a vision model when available.
 **API surface:** 82 routes, all on `api.routes.router`, included via
 `app.include_router()`.
 
+**Per-run + campaign integrity (Phase 1.5):**
+- SHA256 manifest at `projects/<project>/runs/<run_id>/manifest.json` — automatic, end of run
+- Merkle root at `campaigns/<campaign_id>/merkle.json` — automatic, end of campaign
+- HTTP verify: `GET /runs/{run_id}/verify`, `GET /campaigns/{id}/verify-merkle`, `manifest_status` in `/status`
+- CLI: `orchestrator verify-run <run_id>` / `verify-campaign <campaign_id>`
+- Reuses `evidence.signing.sha256_file` (no duplication)
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase task list.
@@ -192,13 +203,14 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     `LlmCall` carries real `call_id` (Prefect task_run.id), `agent_role`,
     `host:port`, `model_digest` (`/api/show`-cached sha256), `model_size_bytes`,
     `response_text`, and `started_at`.
-1.4 DVC on TrueNAS — IN PROGRESS (branch `feat/dvc-truenas`). DVC client
-    + remote scaffolded on the orchestrator LXC; remote points at
+1.4 DVC on TrueNAS — DONE (v0.1.4-phase1.4). DVC client + remote
+    scaffolded on the orchestrator LXC; remote points at
     `ssh://dvc-orchestrator@192.168.2.222/mnt/f3/orchestrator-dvc` over
-    a dedicated TrueNAS user. Helper at `scripts/dvc_track.sh`. End-to-end
-    `dvc push` blocked on TrueNAS-side provisioning (SSH service + user +
-    dataset). See `RUNBOOK.md` "Data versioning with DVC" for full setup.
-1.5 SHA256 artifact manifests
+    a dedicated TrueNAS user. Helper at `scripts/dvc_track.sh`. See
+    `RUNBOOK.md` "Data versioning with DVC" for full setup.
+1.5 SHA256 artifact manifests — DONE (v0.1.5-phase1.5): per-run SHA256
+    manifest.json + per-campaign Merkle merkle.json, lazy verify-on-read,
+    `orchestrator` CLI, +29 unit/hook/route/cli tests (167 total).
 1.6 **Python client library** (separate `ai-orchestrator-client` package)
 1.7 MCP contract hardening (version, auth, documented tools)
 1.8 Op fixes (URL cache single-flight, log rotation, config validation,
@@ -249,7 +261,7 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-06, Phase 1.3 shipped (v0.1.3-phase1.3, PR #4 + #5
-merged); Phase 1.4 (DVC on TrueNAS) in progress on branch `feat/dvc-truenas`.
-When you complete a phase or significantly change architecture, update
-this file before starting the next work item.*
+*Last updated: 2026-05-06, Phase 1.5 shipped (per-run SHA256 manifests +
+campaign Merkle root + verify endpoints + CLI). When you complete a phase
+or significantly change architecture, update this file before starting the
+next work item.*

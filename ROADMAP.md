@@ -186,16 +186,13 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       `/mnt/f3/orchestrator-dvc/files/md5/<2-char-prefix>/<rest>`. Cache
       layout matches DVC's content-addressed store; SSH path + key auth
       verified. Smoke artifact left on remote intentionally as proof of life.
-- [ ] First real snapshot commit (deferred — empty `references/`, large
-      `campaigns/` tree benefits from per-campaign DVC tracking that
-      Phase 1.5 introduces alongside SHA256 manifests, so we'll defer
-      the bulk `dvc add` to that phase rather than running it here)
+- [ ] Bulk DVC snapshot of references/ + campaigns/ (operational; see RUNBOOK § "Phase 1.5 first-time DVC snapshot")
 
-### 1.5 SHA256 artifact manifests
-- [ ] Every run file gets SHA256 in `manifest.json`
-- [ ] Campaign-level manifest (Merkle root)
-- [ ] Verify on read; mark corrupted on mismatch
-- [ ] CLI tool: `orchestrator verify-run <run_id>`
+### 1.5 SHA256 artifact manifests — DONE (v0.1.5-phase1.5, shipped 2026-05-06)
+- [x] Every run file gets SHA256 in `manifest.json`
+- [x] Campaign-level manifest (Merkle root)
+- [x] Verify on read; mark corrupted on mismatch
+- [x] CLI tool: `orchestrator verify-run <run_id>`
 
 ### 1.6 Python client library — PRIMARY CONSUMER CONTRACT
 - [ ] Create separate repo `ai-orchestrator-client`
