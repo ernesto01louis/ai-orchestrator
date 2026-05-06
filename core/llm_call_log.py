@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 
@@ -23,6 +24,14 @@ class LlmCallRecord:
     sampling: dict[str, Any]
     response_tokens: int
     duration_ms: int
+    # Phase J β citation-grade fields. Defaults keep legacy constructors valid.
+    call_id: str = ""
+    agent_role: str = ""
+    server_url: str = ""
+    model_digest: str = ""
+    model_size_bytes: int = 0
+    response_text: str = ""
+    started_at: datetime | None = None
 
 
 class LlmCallLogger:
