@@ -44,9 +44,25 @@ memory_pkg/__init__.py    ~1970 lines    All five memory layers (positive/negati
                                          (named *_pkg to avoid clash with /memory/ data dir)
 orchestration/__init__.py ~1500 lines    run_orchestration loop, planner/judge/generator/
                                          optimizer/troubleshooter agent functions, context
-                                         builders, OrchestrateRequest model, agent schemas
+                                         builders, OrchestrateRequest model, agent schemas.
+                                         Agent fns + helpers wrapped as Prefect @task,
+                                         run_orchestration is a Prefect @flow (Phase 1.3).
+orchestration/campaign.py                run_campaign as Prefect @flow with subflow per combo.
+prefect_io/                              Façade between FastAPI / orchestration and Prefect 3.x:
+  __init__.py                            submit_orchestration / submit_campaign /
+                                         pause_flow_run / resume_flow_run / cancel_flow_run /
+                                         _healthcheck. Falls back to daemon-thread spawn when
+                                         Prefect server is unreachable.
+  state_hooks.py                         Flow + task state hooks → RUN_STATUS, CAMPAIGN_STATUS,
+                                         and LLM_CALL_LOG (LlmCall capture for evidence bundle).
+core/llm_call_log.py                     LlmCallLogger + LlmCallRecord — populated by the
+                                         on_task_completion hook for tasks tagged "llm-call".
 api/routes.py             ~2000 lines    All routes + WebSocket on a single APIRouter
-                                         (campaign + evidence routes appended)
+                                         (campaign + evidence routes appended). /orchestrate
+                                         and /campaigns POST go through prefect_io;
+                                         pause/resume/abort routes call the matching Prefect
+                                         REST API. /status/<run_id> exposes the real
+                                         flow_run_id once captured by the on_running hook.
 evidence/                                Phase 1.2 citation-grade evidence bundle:
   hookspecs.py / __init__.py             pluggy plugin host
   builtin/{stats,lineage,compute,        5 builtin calculators
@@ -152,7 +168,14 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     RO-Crate 1.2 / WRROC bundles with in-toto + SLSA + DSSE attestation,
     REFORMS + NeurIPS checklists, Model Cards, Datasheets, pluggable
     calculators, Ed25519 signing
-1.3 Prefect 3.x as workflow engine
+1.3 Prefect 3.x as workflow engine — IN PROGRESS (Phases A–H done; I/J/K
+    remaining). Branch `feat/prefect-integration` not yet merged. Prefect
+    server lives on dedicated LXC 201 (`prefect-server`, LAN
+    192.168.2.182, tailnet 100.76.57.6). Orchestrator's `config.json`
+    points `prefect.api_url` at the LAN IP; Tailscale on LXC 200 is a
+    deferred follow-up. `execution_mode` defaults to `in_process`
+    (worker systemd unit installed but not started until we switch to
+    `deployment` mode).
 1.4 DVC on TrueNAS for data versioning
 1.5 SHA256 artifact manifests
 1.6 **Python client library** (separate `ai-orchestrator-client` package)
@@ -205,6 +228,7 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: end of Phase 0.g (v0.1.0-phase0). When you complete a
+*Last updated: 2026-05-05, Phase 1.3 H complete (Prefect server LXC live,
+deployments registered, end-to-end smoke green). When you complete a
 phase or significantly change architecture, update this file before
 starting the next work item.*
