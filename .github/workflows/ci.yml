@@ -40,24 +40,6 @@ jobs:
 
   prefect-integration:
     runs-on: ubuntu-latest
-    services:
-      prefect-server:
-        image: prefecthq/prefect:3-latest
-        # The base image ships only the CLI; explicitly start the server.
-        # --host 0.0.0.0 is required so the service port is reachable from
-        # the runner (GitHub service containers run in their own network
-        # namespace but expose mapped ports on localhost).
-        # Without this command: line the container starts but nothing listens
-        # on 4200 — the healthcheck would never pass.
-        command: "prefect server start --host 0.0.0.0"
-        options: >-
-          --health-cmd "python -c 'import urllib.request, sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:4200/api/health\").status == 200 else 1)'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 12
-          --health-start-period 30s
-        ports:
-          - 4200:4200
     env:
       PREFECT_API_URL: http://localhost:4200/api
     steps:
@@ -74,17 +56,28 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-mock httpx
 
+      - name: Start Prefect server (background)
+        run: |
+          nohup prefect server start --host 0.0.0.0 > prefect-server.log 2>&1 &
+          echo "Started Prefect server in background (PID $!)"
+
       - name: Wait for Prefect server
         run: |
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:4200/api/health > /dev/null; then
+          for i in $(seq 1 90); do
+            if python -c "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health', timeout=2)" 2>/dev/null; then
               echo "Prefect server up after ${i}s"
               exit 0
             fi
             sleep 2
           done
           echo "Prefect server never became ready" >&2
+          echo "--- prefect-server.log tail ---" >&2
+          tail -50 prefect-server.log >&2 || true
           exit 1
 
       - name: Run prefect_real tests
         run: pytest -q -m prefect_real
+
+      - name: Show Prefect server log on failure
+        if: failure()
+        run: tail -200 prefect-server.log || true
