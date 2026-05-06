@@ -203,20 +203,13 @@ class _BundleBuilder:
         Scope β work tracked at:
           docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md
         """
-        # Build SamplingParams — temperature is required; fall back to 0.0 if absent
-        # (rec.sampling may be empty or contain backend-specific keys not in the schema).
-        try:
-            sampling = SamplingParams(**rec.sampling)
-        except Exception:
-            # Phase J α: if sampling dict is missing temperature or has incompatible
-            # keys, fall back to a deterministic default rather than failing the build.
-            sampling = SamplingParams(
-                temperature=float(rec.sampling.get("temperature", 0.0)),
-                top_p=rec.sampling.get("top_p"),  # type: ignore[arg-type]
-                top_k=rec.sampling.get("top_k"),  # type: ignore[arg-type]
-                seed=rec.sampling.get("seed"),  # type: ignore[arg-type]
-                num_ctx=rec.sampling.get("num_ctx"),  # type: ignore[arg-type]
-            )
+        # Build SamplingParams — temperature is required; default 0.0 if absent.
+        # SamplingParams.extra="allow" so unknown backend-specific keys are accepted
+        # automatically; no try/except needed.
+        sampling = SamplingParams(
+            temperature=float(rec.sampling.get("temperature", 0.0)),
+            **{k: v for k, v in rec.sampling.items() if k != "temperature"},
+        )
 
         # Phase J α placeholder — LlmCallRecord carries model name only; host,
         # digest, and size require Scope β instrumentation in state_hooks.py.
