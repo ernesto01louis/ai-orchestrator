@@ -166,11 +166,24 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       so `prefect.api_url` can move from LAN IP to tailnet — script staged at
       `root@192.168.2.13:/root/install_ts_lxc200.sh`
 
-### 1.4 DVC on TrueNAS
-- [ ] `pip install dvc[ssh]`
-- [ ] `dvc remote add -d truenas ssh://truenas.local/mnt/tank/orchestrator-dvc`
-- [ ] Track `references/`, campaign outputs, datasets
-- [ ] Pre-commit hook: `dvc status` before commit
+### 1.4 DVC on TrueNAS — IN PROGRESS (branch `feat/dvc-truenas`)
+- [x] `pip install dvc[ssh]` — pinned `dvc[ssh]>=3.67,<4` in `requirements.txt`
+- [x] `dvc init` + `.dvcignore` (excludes venv/, caches, vault/, secrets)
+- [x] Default remote: `ssh://dvc-orchestrator@192.168.2.222/mnt/tank/orchestrator-dvc`
+      (using LAN IP because `truenas.local` doesn't resolve from LXC 200;
+      dedicated user instead of root for least-privilege access)
+- [x] `scripts/dvc_track.sh` — idempotent one-shot to `dvc add references/ campaigns/`
+      and `dvc push`; honours `PATHS=` env override
+- [x] Opt-in pre-commit hook at `scripts/git-hooks-available/pre-commit-dvc-status`
+      with activation instructions in `RUNBOOK.md`. NOT auto-installed —
+      pre-commit hooks must stay opt-in for this repo.
+- [ ] TrueNAS-side provisioning (depends on Louis): enable SSH service,
+      create `dvc-orchestrator` user with home `/mnt/tank/dvc-orchestrator`,
+      install LXC 200 pubkey, create dataset `tank/orchestrator-dvc`
+- [ ] End-to-end smoke: `dvc push` from LXC 200 lands files under
+      `/mnt/tank/orchestrator-dvc/<hash>/<rest>` on TrueNAS
+- [ ] First snapshot commit: track empty `references/` + current `campaigns/`,
+      commit `*.dvc` files
 
 ### 1.5 SHA256 artifact manifests
 - [ ] Every run file gets SHA256 in `manifest.json`

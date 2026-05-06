@@ -184,13 +184,20 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     RO-Crate 1.2 / WRROC bundles with in-toto + SLSA + DSSE attestation,
     REFORMS + NeurIPS checklists, Model Cards, Datasheets, pluggable
     calculators, Ed25519 signing
-1.3 Prefect 3.x as workflow engine — DONE (Phases A–J complete; branch
-    `feat/prefect-integration` pending merge). Prefect server on LXC 201
-    (`prefect-server`, LAN 192.168.2.182, tailnet 100.76.57.6).
-    `execution_mode` defaults to `in_process`; `deployment` mode requires
-    starting the systemd worker. Scope β (citation-grade LlmCall fidelity)
-    deferred — tracked in `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`.
-1.4 DVC on TrueNAS for data versioning
+1.3 Prefect 3.x as workflow engine — DONE (v0.1.3-phase1.3, merged via
+    PR #4 + #5). Prefect server on LXC 201 (`prefect-server`, LAN
+    192.168.2.182, tailnet 100.76.57.6). `execution_mode` defaults to
+    `in_process`; `deployment` mode requires starting the systemd worker.
+    Scope β (citation-grade LlmCall fidelity) shipped on PR #5: every
+    `LlmCall` carries real `call_id` (Prefect task_run.id), `agent_role`,
+    `host:port`, `model_digest` (`/api/show`-cached sha256), `model_size_bytes`,
+    `response_text`, and `started_at`.
+1.4 DVC on TrueNAS — IN PROGRESS (branch `feat/dvc-truenas`). DVC client
+    + remote scaffolded on the orchestrator LXC; remote points at
+    `ssh://dvc-orchestrator@192.168.2.222/mnt/tank/orchestrator-dvc` over
+    a dedicated TrueNAS user. Helper at `scripts/dvc_track.sh`. End-to-end
+    `dvc push` blocked on TrueNAS-side provisioning (SSH service + user +
+    dataset). See `RUNBOOK.md` "Data versioning with DVC" for full setup.
 1.5 SHA256 artifact manifests
 1.6 **Python client library** (separate `ai-orchestrator-client` package)
 1.7 MCP contract hardening (version, auth, documented tools)
@@ -242,7 +249,7 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-06, Phase 1.3 A–J complete (Prefect integration done,
-branch `feat/prefect-integration` pending merge). When you complete a
-phase or significantly change architecture, update this file before
-starting the next work item.*
+*Last updated: 2026-05-06, Phase 1.3 shipped (v0.1.3-phase1.3, PR #4 + #5
+merged); Phase 1.4 (DVC on TrueNAS) in progress on branch `feat/dvc-truenas`.
+When you complete a phase or significantly change architecture, update
+this file before starting the next work item.*

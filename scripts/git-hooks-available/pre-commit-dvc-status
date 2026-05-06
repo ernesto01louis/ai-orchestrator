@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-commit hook (OPT-IN) — runs `dvc status --cloud` before each commit
+# so you can't push code that references DVC artifacts which haven't been
+# uploaded yet. Activate with the symlink command in RUNBOOK.md.
+#
+# Skips silently if dvc is not on PATH (e.g. you're committing without
+# the venv active).
+
+if ! command -v dvc >/dev/null 2>&1; then
+    exit 0
+fi
+
+# `dvc status --cloud` exits 0 when remote is in sync, 1 otherwise.
+out="$(dvc status --cloud 2>&1 || true)"
+if echo "$out" | grep -qE "^(new|deleted|modified|missing)"; then
+    echo "[pre-commit-dvc] uncommitted DVC changes — push with 'dvc push' first" >&2
+    echo "$out" >&2
+    exit 1
+fi
+exit 0

@@ -219,3 +219,83 @@ ssh root@192.168.2.13 "pct exec 201 -- bash -c '
 - Runs continue without Prefect UI tracking until server returns
 - WebSocket UI keeps working because inline `_update_run_status(...)` calls
   in `run_orchestration`/`run_campaign` are preserved as belt-and-suspenders
+
+## Data versioning with DVC (Phase 1.4)
+
+The orchestrator pushes large binary artifacts (RAG references, per-campaign
+evidence crates) to a DVC remote on TrueNAS over SSH. Source tree stays in
+git; data lives on the NAS pool. Tracking files (`*.dvc`) are committed so
+any clone can `dvc pull` to reconstruct the working tree.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| DVC client | LXC 200 (this host) | `pip install 'dvc[ssh]'` already in `requirements.txt` |
+| Remote name | `truenas` (default) | configured in `.dvc/config` |
+| Remote URL | `ssh://dvc-orchestrator@192.168.2.222/mnt/tank/orchestrator-dvc` | adjust if pool/path differs |
+| SSH key | `/root/.ssh/id_rsa` | set via `dvc remote modify truenas keyfile` |
+| TrueNAS user | `dvc-orchestrator` | dedicated, NOT root |
+
+### One-time TrueNAS setup
+1. TrueNAS UI → System Settings → Services → SSH → enable + start.
+2. TrueNAS UI → Credentials → Local Users → Add: username `dvc-orchestrator`,
+   home `/mnt/tank/dvc-orchestrator`, primary group `dvc-orchestrator`,
+   SSH public key = contents of `/root/.ssh/id_rsa.pub` from LXC 200.
+3. TrueNAS UI → Datasets → create dataset `tank/orchestrator-dvc` owned
+   by `dvc-orchestrator:dvc-orchestrator`, mode `0750`.
+4. From LXC 200: `ssh dvc-orchestrator@192.168.2.222 'ls /mnt/tank/orchestrator-dvc'`
+   should succeed without password prompt.
+
+### Tracking the bulky directories
+
+`scripts/dvc_track.sh` is the one-shot entry point — it `dvc add`s
+`references/` and `campaigns/` (the two ROADMAP-1.4 paths) and pushes
+them to the remote. Re-run any time after a campaign finishes:
+
+```bash
+cd /opt/ai-orchestrator
+source venv/bin/activate
+./scripts/dvc_track.sh
+git add references.dvc campaigns.dvc
+git commit -m "dvc: snapshot references + campaigns @ $(date -u +%Y-%m-%d)"
+git push
+```
+
+Override the path list via env: `PATHS="datasets references" ./scripts/dvc_track.sh`.
+
+### Pulling on a fresh clone
+
+```bash
+git clone https://github.com/ernesto01louis/ai-orchestrator.git
+cd ai-orchestrator
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+dvc pull              # restores references/ + campaigns/ from TrueNAS
+```
+
+### Pre-commit hook (OPT-IN)
+
+A pre-commit hook script that blocks commits when DVC artifacts haven't been
+pushed lives at `scripts/git-hooks-available/pre-commit-dvc-status`. It is
+NOT activated by default — pre-commit hooks add friction every commit, and
+this one is only useful if you actively work with DVC-tracked data.
+
+To activate per-clone:
+
+```bash
+ln -s ../../scripts/git-hooks-available/pre-commit-dvc-status \
+       .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+To deactivate later: `rm .git/hooks/pre-commit`.
+
+### Common DVC issues
+
+- `Permission denied (publickey)` from `dvc push` → SSH key not in
+  `dvc-orchestrator@truenas:.ssh/authorized_keys`. Fix in TrueNAS UI.
+- `dvc remote default` shows wrong URL → edit `.dvc/config` directly or
+  `dvc remote modify truenas url ssh://...`.
+- `dvc status` reports "missing" files after `git pull` → run `dvc pull` to
+  restore the working tree from TrueNAS.

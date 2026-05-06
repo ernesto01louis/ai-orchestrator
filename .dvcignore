@@ -1,0 +1,43 @@
+# Patterns of files DVC should NOT traverse / hash. Cuts cold-cache time
+# and keeps the cache clean. See https://dvc.org/doc/user-guide/dvcignore.
+
+# Python tooling output
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Runtime state under version control elsewhere or transient
+.git/
+.planning/
+logs/
+gates.json
+gates_log.json
+
+# Memory files are intentionally version-controlled in git when small
+# (identity.md, primer.md template, etc.) and managed by their own
+# locked JSON I/O when large. DVC should not double-track them.
+memory/embedding_cache.json
+memory/prompt_index.json
+memory/run_index.json
+memory/negative_memory.json
+memory/session_log.json
+memory/model_stats.json
+memory/dream_log.json
+memory/campaigns.json
+memory/lessons/
+memory/targets/
+
+# Local config / secrets
+.env
+.env.*
+config.json
+config.json.bak.*
+config.local.json
+
+# Vault is managed by Syncthing to NAS already; DVC would conflict.
+vault/
