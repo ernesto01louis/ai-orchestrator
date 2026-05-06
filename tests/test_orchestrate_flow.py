@@ -72,7 +72,7 @@ def standard_patches():
     with ExitStack() as stack:
         stack.enter_context(patch("orchestration.planner_agent.fn", return_value=_VALID_PLAN))
         stack.enter_context(patch("orchestration.generate_candidate.fn", return_value=_VALID_CANDIDATE))
-        stack.enter_context(patch("orchestration.sandbox_execute", return_value={"exit_code": 0, "stdout": "hi", "error": ""}))
+        stack.enter_context(patch("orchestration.sandbox_execute", return_value={"returncode": 0, "stdout": "hi", "stderr": ""}))
         stack.enter_context(patch("orchestration.environment_inspector", return_value={"os": "Linux", "python": "python3", "node": "node", "arch": "x86_64"}))
         stack.enter_context(patch("orchestration.gather_live_context", return_value=""))
         stack.enter_context(patch("orchestration.build_full_planner_context", return_value=""))
@@ -106,7 +106,7 @@ def test_evidence_bundle_populates_llm_calls(tiny_request, mock_ollama):
     LLM_CALL_LOG.drain("test-flow-3")  # clear any prior entries
     with ExitStack() as stack:
         stack.enter_context(patch("orchestration.planner_agent.fn", return_value=_VALID_PLAN))
-        stack.enter_context(patch("orchestration.sandbox_execute", return_value={"exit_code": 0, "stdout": "hi", "error": ""}))
+        stack.enter_context(patch("orchestration.sandbox_execute", return_value={"returncode": 0, "stdout": "hi", "stderr": ""}))
         stack.enter_context(patch("orchestration.environment_inspector", return_value={"os": "Linux", "python": "python3", "node": "node", "arch": "x86_64"}))
         stack.enter_context(patch("orchestration.gather_live_context", return_value=""))
         stack.enter_context(patch("orchestration.build_full_planner_context", return_value=""))

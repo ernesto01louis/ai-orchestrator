@@ -144,10 +144,10 @@ def _init_run_status(run_id: str, **kwargs) -> None:
       error                  str | None  — error message on failure
       _judge_primary_down    bool  — True if the primary judge LLM was unreachable
       manifest_status        Literal["ok","corrupted","missing","skipped"] | None
-                             — "ok": manifest.json written and hashes verified
-                             — "corrupted": manifest written but hashes don't match
-                             — "missing": manifest.json absent after run
-                             — "skipped": write attempted but failed (non-fatal)
+                             — "ok": manifest.json written and hashes verified       [Phase B: orchestration hook]
+                             — "skipped": write attempted but failed (non-fatal)     [Phase B: orchestration hook]
+                             — "corrupted": manifest written but hashes don't match  [Phase D: /runs/{id}/verify endpoint]
+                             — "missing": manifest.json absent after run             [Phase D: /runs/{id}/verify endpoint]
                              — None: not yet attempted (run still in progress)
     """
     with _run_status_lock:
