@@ -115,7 +115,7 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 - [ ] *Deferred to Phase 2*: self-hosted Sigstore (Fulcio + Rekor) —
       DSSE envelope abstracts trust root, older bundles stay verifiable
 
-### 1.3 Prefect 3.x integration — DONE (branch `feat/prefect-integration`, PR #4)
+### 1.3 Prefect 3.x integration — DONE (v0.1.3-phase1.3, PR #4 + #5)
 - [x] Prefect 3.6.29 server on dedicated LXC 201 (`prefect-server`,
       LAN 192.168.2.182, Tailscale 100.76.57.6)
 - [x] `run_orchestration` and `run_campaign` wrapped as `@flow`; agent
@@ -143,10 +143,14 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       in a background step and runs `pytest -m prefect_real`
 - [x] Docs: ARCHITECTURE.md (submission flow + execution modes + topology),
       RUNBOOK.md (Prefect ops procedures), CLAUDE.md (module layout + EXISTS)
-- [ ] *Deferred (Scope β)*: citation-grade `LlmCall` fidelity — capture
-      `call_id`/`role`/`target.host`/`response_text`/`started_at` at the
-      state-hook level instead of the current placeholders. Tracked at
-      `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`
+- [x] *Scope β shipped 2026-05-06 in PR #5*: citation-grade `LlmCall` fidelity —
+      `call_id` (Prefect `task_run.id`), `agent_role` (threaded through 12 call
+      sites), `target.host` (parsed from `task_run.parameters['url']`),
+      `model_digest` + `model_size_bytes` (cached `/api/show`), `response_text`,
+      `started_at` (`task_run.start_time`) all captured by the state hook;
+      `evidence/builder.py:_record_to_llm_call` placeholders dropped.
+      Followup doc at `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`
+      flipped to "DONE".
 - [ ] *Deferred (operational)*: install Tailscale on orchestrator LXC 200
       so `prefect.api_url` can move from LAN IP to tailnet — script staged at
       `root@192.168.2.13:/root/install_ts_lxc200.sh`
