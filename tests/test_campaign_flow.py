@@ -75,7 +75,7 @@ def mini_campaign():
 # ---------------------------------------------------------------------------
 
 
-def test_campaign_completes_with_2_combos_and_1_generator(mini_campaign, mock_ollama):
+def test_campaign_completes_with_2_combos_and_1_generator(mini_campaign):
     """run_campaign finalizes CAMPAIGN_STATUS phase as 'completed' for a 2-combo grid.
 
     run_orchestration is patched to a no-op at the module level to avoid
@@ -97,13 +97,13 @@ def test_campaign_completes_with_2_combos_and_1_generator(mini_campaign, mock_ol
     )
 
 
-def test_pause_mid_campaign_resume_completes_remaining(mini_campaign, mock_ollama):
-    """Paused flag set before run_campaign is not cleared by the runner in harness mode.
+def test_pause_mid_campaign_resume_completes_remaining(mini_campaign):
+    """Abort flag set before run_campaign causes the runner to exit via the abort branch.
 
-    This is a harness-mode stub: run_campaign polls _is_paused() in a loop.
-    With paused=True and no external thread to flip it, the loop runs until
-    aborted=True (which we also set to break out).  We verify that paused
-    remains True after the call — the flag was honored, not silently cleared.
+    With paused=True and aborted=True the while-loop inside run_campaign sees
+    aborted first (line 143 of campaign.py), sets final_status="aborted", and
+    breaks out — no combos are processed.  _set_campaign_phase is then called
+    with "aborted" at the end of the flow, so CAMPAIGN_STATUS["phase"] == "aborted".
 
     NOTE: Real pause/resume timing (set flag mid-run, resume after a delay) is
     covered in I3 against the actual Prefect server with a live flow_run_id.
@@ -120,16 +120,22 @@ def test_pause_mid_campaign_resume_completes_remaining(mini_campaign, mock_ollam
         mock_ro.return_value = None
         run_campaign(mini_campaign)
 
-    # paused flag was not cleared by run_campaign (it's the caller's responsibility).
-    assert CAMPAIGN_STATUS.get(mini_campaign, {}).get("paused") is True
+    status = CAMPAIGN_STATUS.get(mini_campaign, {})
+    # Primary: abort branch wrote "aborted" phase (campaign.py line 196).
+    assert status.get("phase") == "aborted", (
+        f"Expected abort branch to set phase='aborted', got {status.get('phase')!r}"
+    )
+    # Secondary: paused flag is caller-managed and was not cleared by run_campaign.
+    assert status.get("paused") is True
 
 
-def test_abort_through_cancel_flow_run(mini_campaign, mock_ollama):
+def test_abort_through_cancel_flow_run(mini_campaign):
     """cancel_flow_run reaches Prefect over HTTP without blowing up the call path.
 
-    The harness has no actual flow run with this uuid, so Prefect may 404.
-    cancel_flow_run is best-effort: it swallows httpx errors (logs a WARNING)
-    and never re-raises, so the expected outcome is a clean return — no exception.
+    cancel_flow_run calls _set_flow_run_state which uses httpx and swallows
+    httpx.HTTPError | OSError (logs a WARNING, never re-raises).  A fake uuid
+    will produce a transport error or a Prefect 404, both of which are swallowed
+    — the function always returns None.  No try/except needed here.
 
     This is different from test_state_hooks.py::test_on_cancelled_emits_evidence_for_campaign_flow
     which mocks _safe_emit_evidence and tests the on_cancelled hook callback directly.
@@ -138,15 +144,6 @@ def test_abort_through_cancel_flow_run(mini_campaign, mock_ollama):
     from prefect_io import cancel_flow_run
 
     fake_uuid = "00000000-0000-0000-0000-000000000000"
-    try:
-        cancel_flow_run(fake_uuid)
-    except Exception as exc:  # noqa: BLE001
-        # If the implementation stops swallowing errors in the future, accept
-        # 404 / ObjectNotFound as the only legitimate failure mode.
-        exc_str = str(exc)
-        exc_type = type(exc).__name__
-        assert (
-            "404" in exc_str
-            or "not found" in exc_str.lower()
-            or "ObjectNotFound" in exc_type
-        ), f"Unexpected exception from cancel_flow_run: {exc_type}: {exc}"
+    # Must return None cleanly — _set_flow_run_state swallows all httpx/OS errors.
+    result = cancel_flow_run(fake_uuid)
+    assert result is None
