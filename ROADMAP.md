@@ -66,9 +66,12 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       sub-file.
 - [ ] Break vault→memory coupling (vault writers should accept
       pre-loaded data as parameters instead of calling load_*).
-- [ ] Backup/restore: rsync from orchestrator LXC to TrueNAS, offsite copy,
-      `RESTORE.md`, quarterly restore tests. (RUNBOOK.md has the manual
-      procedure already.)
+- [x] Backup/restore documentation: `RESTORE.md` is the authoritative
+      procedure (Scenarios A + B + quarterly drill); `scripts/backup.sh`
+      is the rsync-with-link-dest snapshot runner. Open sub-items inside
+      RESTORE.md: activate the nightly cron, set up an offsite copy,
+      run the first quarterly drill. (RUNBOOK.md still has the day-to-day
+      ops; RESTORE.md is the disaster-recovery doc.)
 - [ ] Push the repo to GitHub, enable branch protection on main.
 
 ---
@@ -105,7 +108,15 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 - [x] Standalone Python verifier (`python -m evidence.verify
       --crate-dir`) — pure stdlib + PyNaCl, no orchestrator runtime needed
 - [x] 32 new tests (schema, rocrate, signing, calculators, e2e); 71/71 green
-- [ ] *Deferred to 1.2.1*: HTML viewer (Snakemake-style single-page)
+- [x] *Phase 1.2.1 shipped 2026-05-06*: self-contained HTML viewer at
+      `evidence/html_viewer.py` — `build_html(bundle)` returns a single page
+      with bundle JSON embedded as `<script type="application/json">`,
+      vanilla JS rendering, all CSS inline. Builder emits `evidence.html`
+      alongside `evidence.json` so it's covered by the signed manifest.
+      Renders header/hypothesis, fingerprints, LLM targets, runs (with
+      drill-down LLM calls and code executions), calculators, REFORMS +
+      NeurIPS responses, model cards, datasheets, artifacts. No CDN
+      dependency — works under `file://`.
 - [x] *Closed in 1.3 (Scope α)*: per-LLM-call telemetry capture — `LLM_CALL_LOG`
       buffer populated by Prefect `on_task_completion` state hook for tasks
       tagged `"llm-call"`; drained per run in `evidence/builder.py` into
@@ -115,7 +126,7 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 - [ ] *Deferred to Phase 2*: self-hosted Sigstore (Fulcio + Rekor) —
       DSSE envelope abstracts trust root, older bundles stay verifiable
 
-### 1.3 Prefect 3.x integration — DONE (branch `feat/prefect-integration`, PR #4)
+### 1.3 Prefect 3.x integration — DONE (v0.1.3-phase1.3, PR #4 + #5)
 - [x] Prefect 3.6.29 server on dedicated LXC 201 (`prefect-server`,
       LAN 192.168.2.182, Tailscale 100.76.57.6)
 - [x] `run_orchestration` and `run_campaign` wrapped as `@flow`; agent
@@ -143,10 +154,14 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       in a background step and runs `pytest -m prefect_real`
 - [x] Docs: ARCHITECTURE.md (submission flow + execution modes + topology),
       RUNBOOK.md (Prefect ops procedures), CLAUDE.md (module layout + EXISTS)
-- [ ] *Deferred (Scope β)*: citation-grade `LlmCall` fidelity — capture
-      `call_id`/`role`/`target.host`/`response_text`/`started_at` at the
-      state-hook level instead of the current placeholders. Tracked at
-      `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`
+- [x] *Scope β shipped 2026-05-06 in PR #5*: citation-grade `LlmCall` fidelity —
+      `call_id` (Prefect `task_run.id`), `agent_role` (threaded through 12 call
+      sites), `target.host` (parsed from `task_run.parameters['url']`),
+      `model_digest` + `model_size_bytes` (cached `/api/show`), `response_text`,
+      `started_at` (`task_run.start_time`) all captured by the state hook;
+      `evidence/builder.py:_record_to_llm_call` placeholders dropped.
+      Followup doc at `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`
+      flipped to "DONE".
 - [ ] *Deferred (operational)*: install Tailscale on orchestrator LXC 200
       so `prefect.api_url` can move from LAN IP to tailnet — script staged at
       `root@192.168.2.13:/root/install_ts_lxc200.sh`
