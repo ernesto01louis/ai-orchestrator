@@ -107,3 +107,8 @@ websockets==15.0.1
 yarl==1.23.0
 zstandard==0.25.0
 prefect>=3.0,<4
+
+# Phase 1.4 — DVC on TrueNAS for data versioning. The [ssh] extra pulls in
+# asyncssh / sshfs so DVC can push/pull through the dvc-orchestrator user
+# on the TrueNAS pool over SSH (no CIFS dependency).
+dvc[ssh]>=3.67,<4

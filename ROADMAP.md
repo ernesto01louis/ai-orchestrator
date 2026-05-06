@@ -166,11 +166,30 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       so `prefect.api_url` can move from LAN IP to tailnet — script staged at
       `root@192.168.2.13:/root/install_ts_lxc200.sh`
 
-### 1.4 DVC on TrueNAS
-- [ ] `pip install dvc[ssh]`
-- [ ] `dvc remote add -d truenas ssh://truenas.local/mnt/tank/orchestrator-dvc`
-- [ ] Track `references/`, campaign outputs, datasets
-- [ ] Pre-commit hook: `dvc status` before commit
+### 1.4 DVC on TrueNAS — IN PROGRESS (branch `feat/dvc-truenas`)
+- [x] `pip install dvc[ssh]` — pinned `dvc[ssh]>=3.67,<4` in `requirements.txt`
+- [x] `dvc init` + `.dvcignore` (excludes venv/, caches, vault/, secrets)
+- [x] Default remote: `ssh://dvc-orchestrator@192.168.2.222/mnt/f3/orchestrator-dvc`
+      (using LAN IP because `truenas.local` doesn't resolve from LXC 200;
+      dedicated user instead of root for least-privilege access)
+- [x] `scripts/dvc_track.sh` — idempotent one-shot to `dvc add references/ campaigns/`
+      and `dvc push`; honours `PATHS=` env override
+- [x] Opt-in pre-commit hook at `scripts/git-hooks-available/pre-commit-dvc-status`
+      with activation instructions in `RUNBOOK.md`. NOT auto-installed —
+      pre-commit hooks must stay opt-in for this repo.
+- [x] TrueNAS-side provisioning (Louis): SSH service enabled,
+      `dvc-orchestrator` user with `Disable Password` + ed25519 pubkey from
+      `/root/.ssh/id_ed25519_dvc.pub`, dataset `f3/orchestrator-dvc` owned
+      by `dvc-orchestrator:dvc-orchestrator`. Pool name is `f3` (not `tank`)
+      so remote URL = `ssh://dvc-orchestrator@192.168.2.222/mnt/f3/orchestrator-dvc`.
+- [x] End-to-end smoke 2026-05-06: `dvc push` of a 39-byte test file landed at
+      `/mnt/f3/orchestrator-dvc/files/md5/<2-char-prefix>/<rest>`. Cache
+      layout matches DVC's content-addressed store; SSH path + key auth
+      verified. Smoke artifact left on remote intentionally as proof of life.
+- [ ] First real snapshot commit (deferred — empty `references/`, large
+      `campaigns/` tree benefits from per-campaign DVC tracking that
+      Phase 1.5 introduces alongside SHA256 manifests, so we'll defer
+      the bulk `dvc add` to that phase rather than running it here)
 
 ### 1.5 SHA256 artifact manifests
 - [ ] Every run file gets SHA256 in `manifest.json`
