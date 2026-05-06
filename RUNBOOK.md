@@ -362,11 +362,21 @@ curl http://127.0.0.1:8000/campaigns/<campaign_id>/verify-merkle
 curl http://127.0.0.1:8000/status/<run_id>
 ```
 
-All three return JSON with the shape:
+**Run verify** (`/runs/<run_id>/verify`) returns:
 
 ```json
 {"run_id": "...", "valid": true, "status": "ok", "mismatches": []}
 ```
+
+**Campaign verify** (`/campaigns/<campaign_id>/verify-merkle`) returns:
+
+```json
+{"campaign_id": "...", "valid": true, "status": "ok", "mismatches": []}
+```
+
+**Status endpoint** (`/status/<run_id>`) is not a verify-result envelope — it
+returns the existing status response shape with `manifest_status` added as a
+new field (lazy-computed on first read for completed runs, cached after).
 
 HTTP 200 always — mismatches are domain-level errors, not HTTP errors.
 HTTP 404 only when the run/campaign ID itself is unknown.
@@ -387,7 +397,7 @@ large directories:
 
 ```bash
 # After `pip install -e .` in the activated venv on LXC 200:
-bash scripts/dvc_track.sh references campaigns
+bash scripts/dvc_track.sh
 
 # Then commit the resulting tracking files:
 git add references.dvc campaigns.dvc .gitignore

@@ -210,7 +210,7 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     `RUNBOOK.md` "Data versioning with DVC" for full setup.
 1.5 SHA256 artifact manifests — DONE (v0.1.5-phase1.5): per-run SHA256
     manifest.json + per-campaign Merkle merkle.json, lazy verify-on-read,
-    `orchestrator` CLI, +29 unit/hook/route/cli tests (167 total).
+    `orchestrator` CLI, +46 unit/hook/route/cli tests (167 total).
 1.6 **Python client library** (separate `ai-orchestrator-client` package)
 1.7 MCP contract hardening (version, auth, documented tools)
 1.8 Op fixes (URL cache single-flight, log rotation, config validation,
