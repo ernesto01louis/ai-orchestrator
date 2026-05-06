@@ -20,9 +20,6 @@ from datetime import datetime
 from typing import Any
 
 from prefect import flow, task
-from prefect_io.state_hooks import (
-    on_running, on_completion, on_failure, on_cancelled,
-)
 
 from core.runtime import (
     CAMPAIGN_STATUS,
@@ -32,6 +29,12 @@ from core.runtime import (
     log,
 )
 from memory_pkg import load_campaigns, save_campaigns, vault_write_campaign_note
+from prefect_io.state_hooks import (
+    on_cancelled,
+    on_completion,
+    on_failure,
+    on_running,
+)
 
 _PAUSE_POLL_SECONDS = 5.0
 

@@ -14,6 +14,7 @@ Run with:
 """
 from __future__ import annotations
 
+import time
 import uuid
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -189,11 +190,18 @@ def test_cancel_flow_run_through_real_server():
     # the real LAN server (192.168.2.182:4200) regardless of harness settings.
     cancel_flow_run(flow_run_id)
 
-    # Verify the cancellation took — Prefect transitions SCHEDULED→CANCELLED
-    # immediately (no worker needed to handle CANCELLING for unstarted runs).
-    r2 = httpx.get(real_api_url() + f"/flow_runs/{flow_run_id}", timeout=5.0)
-    assert r2.status_code == 200
-    state_type = r2.json()["state"]["type"]
+    # Poll for CANCEL* — Prefect typically flips SCHEDULED→CANCELLED in
+    # tens of ms locally, but a slow CI runner can stay in SCHEDULED briefly
+    # before the cancel signal is processed. 5s budget at 100ms steps.
+    deadline = time.time() + 5.0
+    state_type = ""
+    while time.time() < deadline:
+        r2 = httpx.get(real_api_url() + f"/flow_runs/{flow_run_id}", timeout=5.0)
+        assert r2.status_code == 200
+        state_type = r2.json()["state"]["type"]
+        if "CANCEL" in state_type.upper():
+            break
+        time.sleep(0.1)
     assert "CANCEL" in state_type.upper(), (
-        f"Expected CANCEL* state, got {state_type!r}"
+        f"Expected CANCEL* state within 5s, got {state_type!r}"
     )
