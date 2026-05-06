@@ -9,36 +9,37 @@ from core.paths import CAMPAIGN_TEMPLATES_DIR, PROJECTS_DIR
 from manifest import verify_campaign_merkle, verify_run_manifest
 
 
-def _resolve_run_dir(run_id: str, projects_dir: Path) -> Path:
-    """Find <projects_dir>/<project>/runs/<run_id>/ by scanning project subdirs.
-
-    Errors with sys.exit(1) if zero or >1 matches.
-    """
-    matches: list[Path] = []
+def _resolve_run_dir(run_id: str, projects_dir: Path) -> Path | None:
+    """Find <projects_dir>/<project>/runs/<run_id>/.
+    Returns None and prints an error if 0 or >1 matches."""
     if not projects_dir.is_dir():
-        print(f"error: projects directory {projects_dir} does not exist", file=sys.stderr)
-        sys.exit(1)
+        print(f"error: projects directory not found: {projects_dir}", file=sys.stderr)
+        return None
+    matches: list[Path] = []
     for project_dir in projects_dir.iterdir():
         if not project_dir.is_dir():
             continue
         candidate = project_dir / "runs" / run_id
         if candidate.is_dir():
             matches.append(candidate)
-    if len(matches) == 0:
+    if not matches:
         print(f"error: run_id {run_id!r} not found under {projects_dir}", file=sys.stderr)
-        sys.exit(1)
+        return None
     if len(matches) > 1:
         print(
-            f"error: run_id {run_id!r} matches multiple projects: {[str(m) for m in matches]}",
+            f"error: run_id {run_id!r} matches multiple projects: "
+            f"{[str(m) for m in matches]}",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return None
     return matches[0]
 
 
 def _cmd_verify_run(args: argparse.Namespace) -> int:
     projects_dir = Path(args.projects_dir) if args.projects_dir else Path(PROJECTS_DIR)
     run_dir = _resolve_run_dir(args.run_id, projects_dir)
+    if run_dir is None:
+        return 1
     result = verify_run_manifest(run_dir)
     if result.valid:
         print(f"OK: {args.run_id} (manifest verified, {len(result.expected or {})} files)")
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_run = sub.add_parser("verify-run", help="verify a single run's SHA256 manifest")
-    p_run.add_argument("run_id")
+    p_run.add_argument("run_id", metavar="RUN_ID", help="run ID (UUID) to verify")
     p_run.add_argument(
         "--projects-dir",
         default=None,
@@ -86,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.set_defaults(func=_cmd_verify_run)
 
     p_camp = sub.add_parser("verify-campaign", help="verify a campaign's Merkle root")
-    p_camp.add_argument("campaign_id")
+    p_camp.add_argument("campaign_id", metavar="CAMPAIGN_ID", help="campaign ID (UUID) to verify")
     p_camp.add_argument(
         "--campaigns-dir",
         default=None,

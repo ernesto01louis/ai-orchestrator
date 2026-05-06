@@ -15,8 +15,9 @@ from manifest import write_campaign_merkle, write_run_manifest
 # Helpers
 # ---------------------------------------------------------------------------
 
-_ENV = {**os.environ, "PYTHONPATH": "/opt/ai-orchestrator"}
-_CWD = "/opt/ai-orchestrator"
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+_CWD = _REPO_ROOT
+_ENV = {**os.environ, "PYTHONPATH": _REPO_ROOT}
 
 
 def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
