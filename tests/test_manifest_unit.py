@@ -348,3 +348,31 @@ def test_verify_campaign_merkle_missing_merkle_file(tmp_path: Path) -> None:
     result = verify_campaign_merkle(campaign_dir, tmp_path / "projects")
     assert result.status == "missing"
     assert not result.valid
+
+
+def test_verify_run_manifest_corrupt_json(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_bytes(b"not valid json {{{")
+    result = verify_run_manifest(run_dir)
+    assert result.status == "corrupted"
+    # mismatch should mention the unparseable manifest
+    assert any("unparseable" in m or "manifest.json" in m for m in result.mismatches)
+
+
+def test_verify_campaign_merkle_corrupt_json(tmp_path: Path) -> None:
+    campaign_dir = tmp_path / "camp"
+    campaign_dir.mkdir()
+    (campaign_dir / "merkle.json").write_bytes(b"not valid json {{{")
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    result = verify_campaign_merkle(campaign_dir, projects_root)
+    assert result.status == "corrupted"
+
+
+def test_compute_campaign_merkle_empty_runs(tmp_path: Path) -> None:
+    campaign_dir = tmp_path / "camp"
+    campaign_dir.mkdir()
+    result = compute_campaign_merkle(campaign_dir, [])
+    assert result["merkle_root"] == hashlib.sha256(b"").hexdigest()
+    assert result["runs"] == []

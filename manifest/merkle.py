@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from core.locks import locked_read_json, locked_write_json
 from evidence.signing import sha256_file
@@ -48,11 +49,17 @@ def compute_merkle_root(leaves: list[bytes]) -> str:
     return level[0].hex()
 
 
+def _missing_sentinel(run_id: str) -> str:
+    """Deterministic placeholder hash for a run with no manifest.json.
+    Keeps Merkle tree shape stable when a run failed before its manifest was written."""
+    return hashlib.sha256(b"MISSING_MANIFEST:" + run_id.encode()).hexdigest()
+
+
 def compute_campaign_merkle(
     campaign_dir: Path,
     run_dirs: list[tuple[str, str, Path]],  # (run_id, project_name, run_dir)
     campaign_id: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Compute a campaign Merkle dict from the given run directories.
 
     For each run_dir, hashes its manifest.json. If missing, uses a deterministic
@@ -75,9 +82,7 @@ def compute_campaign_merkle(
         if manifest_path.exists():
             manifest_sha256 = sha256_file(manifest_path)
         else:
-            manifest_sha256 = hashlib.sha256(
-                b"MISSING_MANIFEST:" + run_id.encode()
-            ).hexdigest()
+            manifest_sha256 = _missing_sentinel(run_id)
 
         run_entries.append(
             {
@@ -153,9 +158,7 @@ def verify_campaign_merkle(campaign_dir: Path, projects_root: Path) -> VerifyRes
         if manifest_path.exists():
             current_sha256 = sha256_file(manifest_path)
         else:
-            current_sha256 = hashlib.sha256(
-                b"MISSING_MANIFEST:" + run_id.encode()
-            ).hexdigest()
+            current_sha256 = _missing_sentinel(run_id)
 
         if current_sha256 != stored_sha256:
             mismatches.append(run_id)
