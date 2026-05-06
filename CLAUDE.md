@@ -76,7 +76,8 @@ evidence/                                Phase 1.2 citation-grade evidence bundl
 agents/                                  Per-role configs + agents/loader.py
 dream.py, gates.py,                      Already extracted, kept at root for compat
 mcp_server.py
-campaigns/                               YAML templates + per-campaign evidence crates
+campaign_templates/                      YAML campaign templates (git-tracked)
+campaigns/                               Per-campaign evidence crates (DVC-tracked)
 scripts/install_signing_key.sh           one-shot Ed25519 key setup
 scripts/install_prefect.sh               LXC 201 bootstrap (Prefect server install).
 scripts/install_prefect_worker.sh        orchestrator-side bootstrap (registers deployments).

@@ -80,7 +80,7 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 
 ### 1.1 Campaign abstraction — DONE
 - [x] Pydantic `Campaign` model in `core/campaign.py`
-- [x] `campaigns/` directory with YAML templates (`campaigns/example.yaml`)
+- [x] `campaign_templates/` directory with YAML templates (`campaign_templates/example.yaml`)
 - [x] `POST /campaigns`, `GET /campaigns`, `GET /campaigns/{id}/tree`
 - [x] `POST /campaigns/{id}/{pause,resume,abort}`
 - [x] Campaign runner in `orchestration/campaign.py`

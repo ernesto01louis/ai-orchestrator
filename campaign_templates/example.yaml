@@ -9,7 +9,7 @@
 # campaign definitions as JSON via POST /campaigns; YAML hot-reload
 # loader lands in a follow-up. To create a campaign from this file today:
 #
-#   python -c "import yaml,json; print(json.dumps(yaml.safe_load(open('campaigns/example.yaml'))))" \
+#   python -c "import yaml,json; print(json.dumps(yaml.safe_load(open('campaign_templates/example.yaml'))))" \
 #     | curl -s -X POST http://127.0.0.1:8000/campaigns \
 #         -H 'content-type: application/json' -d @-
 

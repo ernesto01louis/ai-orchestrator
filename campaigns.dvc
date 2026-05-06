@@ -1,0 +1,6 @@
+outs:
+- md5: 6ad426bacbfbd1cc54c7f40a34be6134.dir
+  size: 26184077
+  nfiles: 4720
+  hash: md5
+  path: campaigns

@@ -392,58 +392,35 @@ HTTP 404 only when the run/campaign ID itself is unknown.
 
 ## Phase 1.5 first-time DVC snapshot
 
-After Phase 1.5 ships, take a one-shot bulk DVC snapshot of the bulky
-directories:
+Phase 1.5 took the one-shot bulk DVC snapshot of `references/` and
+`campaigns/` to TrueNAS:
 
 ```bash
 # In the activated venv on LXC 200:
 bash scripts/dvc_track.sh
 
 # Then commit the resulting tracking files:
-git add references.dvc .gitignore
+git add references.dvc campaigns.dvc .gitignore
 git commit -m "chore(dvc): Phase 1.5 first-time bulk snapshot"
 git push
 ```
 
-This is a one-time operational step performed once after Phase 1.5
-deploys. It does NOT need to run on every campaign or every commit —
-DVC tracking is opt-in for the specific paths added here.
+This is a one-time operational step. It does NOT need to run on every
+campaign or every commit — DVC tracking is opt-in for the specific
+paths added here.
 
 ### Status as of 2026-05-06
 
-`references/` was successfully snapshotted (empty placeholder; future
-RAG content will land here and a follow-up `dvc add references` will
-update the tracking).
+- ✅ `references/` snapshotted (empty placeholder; future RAG corpora
+  land here and a follow-up `dvc add references` updates the tracking).
+- ✅ `campaigns/` snapshotted (4720 files, 26 MB at first snapshot).
+  Required prerequisite: the YAML campaign template that previously
+  lived at `campaigns/example.yaml` was moved to
+  `campaign_templates/example.yaml` so DVC could add `campaigns/`
+  without colliding with a git-tracked file inside it.
 
-`campaigns/` could **not** be DVC-tracked in this snapshot because
-`campaigns/example.yaml` is git-tracked, and DVC refuses to add a
-directory that already contains SCM-tracked files:
-
-```
-ERROR:  output 'campaigns' is already tracked by SCM (e.g. Git).
-```
-
-**Operator decision required before campaigns/ can be DVC-tracked.**
-Three options:
-
-1. **Move `example.yaml` out of `campaigns/`** (e.g., to
-   `campaign_templates/example.yaml`) — cleanest, but a small breaking
-   change for any code or doc that references the current path. Search
-   surface: `grep -rn 'campaigns/example.yaml'` to see callers.
-2. **Track each per-campaign subdir individually**:
-   `for d in campaigns/*/; do dvc add "$d"; done` — produces a `*.dvc`
-   per campaign (377 files), which is verbose in git but matches the
-   gitignore rule (`campaigns/*/`) exactly.
-3. **Leave `campaigns/` untracked by DVC**. Per-campaign snapshots
-   already happen via the existing evidence-bundle pipeline; durable
-   storage of the data layer is deferred until a different mechanism
-   (e.g., per-run rclone, or a future Phase 2 object-store layer)
-   replaces this need.
-
-Until one of these is decided, `campaigns/` lives in the
-local filesystem only (still gitignored, still on TrueNAS via the
-nightly `scripts/backup.sh` rsync).
-
-For per-RAG-corpus snapshots going forward, re-run
-`scripts/dvc_track.sh` as described in the "Tracking the bulky
+YAML campaign templates now live under `campaign_templates/` (in git);
+per-campaign evidence crates live under `campaigns/` (DVC-tracked, on
+TrueNAS). For per-RAG-corpus or per-campaign re-snapshots going forward,
+re-run `scripts/dvc_track.sh` as described in the "Tracking the bulky
 directories" section above.
