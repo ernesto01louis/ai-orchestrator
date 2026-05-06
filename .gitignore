@@ -69,3 +69,5 @@ Thumbs.db
 
 # Node
 node_modules/
+/references
+/campaigns

@@ -17,10 +17,12 @@ import time
 import traceback
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from prefect import flow, task
 
+from core.paths import CAMPAIGN_TEMPLATES_DIR, PROJECTS_DIR
 from core.runtime import (
     CAMPAIGN_STATUS,
     RUN_STATUS,
@@ -28,6 +30,7 @@ from core.runtime import (
     _init_run_status,
     log,
 )
+from manifest import write_campaign_merkle
 from memory_pkg import load_campaigns, save_campaigns, vault_write_campaign_note
 from prefect_io.state_hooks import (
     on_cancelled,
@@ -195,6 +198,28 @@ def run_campaign(campaign_id: str) -> None:
         save_campaigns(campaigns)
         _safe_vault_write(campaigns[campaign_id])
         _safe_emit_evidence.submit(campaign_id).result(raise_on_failure=False)
+
+    # Phase C: write campaign-level Merkle root on the success path only.
+    if final_status == "completed":
+        try:
+            campaign_dir = CAMPAIGN_TEMPLATES_DIR / campaign_id
+            campaign_dir.mkdir(parents=True, exist_ok=True)
+            # Build (run_id, project_name, run_dir) tuples from completed runs.
+            run_tuples: list[tuple[str, str, object]] = []
+            for run_entry in (campaigns.get(campaign_id, {}).get("runs") or []):
+                rid = run_entry.get("run_id", "")
+                project = RUN_STATUS.get(rid, {}).get("project") or ""
+                if rid and project:
+                    run_dir = Path(PROJECTS_DIR) / project / "runs" / rid
+                    run_tuples.append((rid, project, run_dir))
+            write_campaign_merkle(campaign_dir, run_tuples, campaign_id=campaign_id)
+            with _campaign_status_lock:
+                CAMPAIGN_STATUS.setdefault(campaign_id, {})["manifest_status"] = "ok"
+            log(campaign_id, "manifest: campaign Merkle root written")
+        except Exception as exc:
+            log(campaign_id, f"campaign merkle write failed (non-fatal): {exc}")
+            with _campaign_status_lock:
+                CAMPAIGN_STATUS.setdefault(campaign_id, {})["manifest_status"] = "skipped"
 
     _set_campaign_phase(campaign_id, final_status)
     with _campaign_status_lock:

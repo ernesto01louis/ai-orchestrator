@@ -312,3 +312,115 @@ To deactivate later: `rm .git/hooks/pre-commit`.
   `dvc remote modify truenas url ssh://...`.
 - `dvc status` reports "missing" files after `git pull` → run `dvc pull` to
   restore the working tree from TrueNAS.
+
+## Verifying run integrity (Phase 1.5)
+
+Every successful run automatically writes a SHA256 manifest, and every
+successful campaign rolls those up into a Merkle root. These are passive
+— no operator action needed for day-to-day use.
+
+### Where the files live
+
+- **Per-run manifest** — `projects/<project>/runs/<run_id>/manifest.json`  
+  Written at the end of every successful run. Contains SHA256 + size for
+  every artifact in the run directory. Symlinks are skipped; the manifest
+  file itself is excluded from its own hash set.
+
+- **Campaign Merkle root** — `campaigns/<campaign_id>/merkle.json`  
+  Written at the end of every successful campaign. Rolls up each run's
+  manifest hash into a single Merkle root, giving tamper-evident
+  campaign-level integrity in one value.
+
+### CLI verification
+
+After `pip install -e .` (or in the activated venv):
+
+```bash
+# Verify a single run
+orchestrator verify-run <run_id>
+orchestrator verify-campaign <campaign_id>
+
+# Or directly without install:
+python -m cli.main verify-run <run_id>
+python -m cli.main verify-campaign <campaign_id>
+
+# Override default paths:
+orchestrator verify-run <run_id> --projects-dir /path/to/projects
+orchestrator verify-campaign <camp_id> --campaigns-dir /path/to/campaigns
+```
+
+Exit 0 = ok; exit 1 = corrupted, missing, or not found.
+
+### HTTP verification
+
+```bash
+curl http://127.0.0.1:8000/runs/<run_id>/verify
+curl http://127.0.0.1:8000/campaigns/<campaign_id>/verify-merkle
+
+# manifest_status is also included in the standard status endpoint
+# (lazy-computed on first read for completed runs, cached after):
+curl http://127.0.0.1:8000/status/<run_id>
+```
+
+**Run verify** (`/runs/<run_id>/verify`) returns:
+
+```json
+{"run_id": "...", "valid": true, "status": "ok", "mismatches": []}
+```
+
+**Campaign verify** (`/campaigns/<campaign_id>/verify-merkle`) returns:
+
+```json
+{"campaign_id": "...", "valid": true, "status": "ok", "mismatches": []}
+```
+
+**Status endpoint** (`/status/<run_id>`) is not a verify-result envelope — it
+returns the existing status response shape with `manifest_status` added as a
+new field (lazy-computed on first read for completed runs, cached after).
+
+HTTP 200 always — mismatches are domain-level errors, not HTTP errors.
+HTTP 404 only when the run/campaign ID itself is unknown.
+
+### Status values
+
+| Status | Meaning |
+|---|---|
+| `ok` | All tracked files match their recorded SHA256 + size. |
+| `corrupted` | At least one file's SHA256 differs from the manifest, or files are missing/extra on disk vs. what the manifest recorded. |
+| `missing` | The manifest file does not exist (run predates Phase 1.5, or was never written). |
+| `skipped` | Manifest write failed at end-of-run/campaign (transient failure), or verify itself raised on a filesystem error. Treat as "not verified" rather than "corruption confirmed". |
+
+## Phase 1.5 first-time DVC snapshot
+
+Phase 1.5 took the one-shot bulk DVC snapshot of `references/` and
+`campaigns/` to TrueNAS:
+
+```bash
+# In the activated venv on LXC 200:
+bash scripts/dvc_track.sh
+
+# Then commit the resulting tracking files:
+git add references.dvc campaigns.dvc .gitignore
+git commit -m "chore(dvc): Phase 1.5 first-time bulk snapshot"
+git push
+```
+
+This is a one-time operational step. It does NOT need to run on every
+campaign or every commit — DVC tracking is opt-in for the specific
+paths added here.
+
+### Status as of 2026-05-06
+
+- ✅ `references/` snapshotted (empty placeholder; future RAG corpora
+  land here and a follow-up `dvc add references` updates the tracking).
+- ✅ `campaigns/` snapshotted (4720 files, 26 MB at first snapshot).
+  Required prerequisite: the YAML campaign template that previously
+  lived at `campaigns/example.yaml` was moved to
+  `campaign_templates/example.yaml` so DVC could add `campaigns/`
+  without colliding with a git-tracked file inside it.
+
+YAML campaign templates now live under `campaign_templates/` (in git);
+per-campaign evidence crates live under `campaigns/` (DVC-tracked, on
+TrueNAS). For per-RAG-corpus or per-campaign re-snapshots going forward,
+re-run `scripts/dvc_track.sh` as described in the "Tracking the bulky
+directories" section above.

@@ -30,7 +30,10 @@ ORCHESTRATOR_PAUSED = False
 
 # Per-campaign live flags (Phase 1.1). Keyed by campaign_id; entries:
 #   {"phase": "queued"|"running"|"paused"|"completed"|"aborted"|"failed",
-#    "paused": bool, "aborted": bool, "current_run_id": str | None}
+#    "paused": bool, "aborted": bool, "current_run_id": str | None,
+#    "manifest_status": "ok"|"corrupted"|"missing"|"skipped"|None}
+#      - "ok" / "skipped" set by run_campaign hook at end of campaign  (Phase C)
+#      - "corrupted" / "missing" set by /campaigns/{id}/verify-merkle  (Phase D)
 CAMPAIGN_STATUS: dict = {}
 _campaign_status_lock = threading.Lock()
 
@@ -134,11 +137,27 @@ def _update_run_status(run_id: str, **kwargs) -> None:
 
 
 def _init_run_status(run_id: str, **kwargs) -> None:
-    """Thread-safe initialization of a new run entry."""
+    """Thread-safe initialization of a new run entry.
+
+    Fields:
+      phase                  str   — current lifecycle phase / last log message
+      score                  float — best score achieved (0–10)
+      completed              bool  — True once the run reaches a terminal state
+      result                 dict | None — final result payload on success
+      error                  str | None  — error message on failure
+      _judge_primary_down    bool  — True if the primary judge LLM was unreachable
+      manifest_status        Literal["ok","corrupted","missing","skipped"] | None
+                             — "ok": manifest.json written and hashes verified       [Phase B: orchestration hook]
+                             — "skipped": write attempted but failed (non-fatal)     [Phase B: orchestration hook]
+                             — "corrupted": manifest written but hashes don't match  [Phase D: /runs/{id}/verify endpoint]
+                             — "missing": manifest.json absent after run             [Phase D: /runs/{id}/verify endpoint]
+                             — None: not yet attempted (run still in progress)
+    """
     with _run_status_lock:
         RUN_STATUS[run_id] = {
             "phase": "queued", "score": 0, "completed": False,
             "result": None, "error": None, "_judge_primary_down": False,
+            "manifest_status": None,
             **kwargs,
         }
 
