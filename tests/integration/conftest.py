@@ -17,13 +17,9 @@ Only active when the ``prefect_real`` marker is selected (``-m prefect_real``).
 """
 from __future__ import annotations
 
-import os
-
 import pytest
 
-
-def _real_api_url() -> str:
-    return os.environ.get("PREFECT_API_URL", "http://127.0.0.1:4200/api").rstrip("/")
+from tests.integration._helpers import real_api_url
 
 
 @pytest.fixture(autouse=True)
@@ -32,8 +28,15 @@ def _real_server_settings():
 
     This overrides the harness's temporary_settings context for the duration
     of each test in this directory, so @flow invocations go to the real server.
+
+    Note: the session-scoped _prefect_test_harness (root conftest) pushes its
+    own settings context for the SQLite test instance.  We push a nested
+    temporary_settings here to override PREFECT_API_URL back to the real server
+    for this directory's tests.  If a future Prefect version changes how
+    settings contexts stack, this override may need to be replaced with explicit
+    ``get_client(api_url=...)`` calls per test.
     """
     from prefect.settings import PREFECT_API_URL, temporary_settings
 
-    with temporary_settings(updates={PREFECT_API_URL: _real_api_url()}):
+    with temporary_settings(updates={PREFECT_API_URL: real_api_url()}):
         yield
