@@ -66,9 +66,12 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       sub-file.
 - [ ] Break vault→memory coupling (vault writers should accept
       pre-loaded data as parameters instead of calling load_*).
-- [ ] Backup/restore: rsync from orchestrator LXC to TrueNAS, offsite copy,
-      `RESTORE.md`, quarterly restore tests. (RUNBOOK.md has the manual
-      procedure already.)
+- [x] Backup/restore documentation: `RESTORE.md` is the authoritative
+      procedure (Scenarios A + B + quarterly drill); `scripts/backup.sh`
+      is the rsync-with-link-dest snapshot runner. Open sub-items inside
+      RESTORE.md: activate the nightly cron, set up an offsite copy,
+      run the first quarterly drill. (RUNBOOK.md still has the day-to-day
+      ops; RESTORE.md is the disaster-recovery doc.)
 - [ ] Push the repo to GitHub, enable branch protection on main.
 
 ---
