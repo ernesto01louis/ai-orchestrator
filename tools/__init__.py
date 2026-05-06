@@ -182,7 +182,8 @@ def run_tools(prompt, plan, env, target, planner_model, run_id):
         user_prompt,
         _tool_dispatch_schema(),
         resolve_chat_url(planner_model),
-        run_id
+        run_id,
+        agent_role="tool_dispatch",
     ).parsed
 
     if not result or not isinstance(result, dict):

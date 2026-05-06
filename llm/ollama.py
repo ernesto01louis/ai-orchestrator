@@ -7,6 +7,7 @@ URL if the cache is empty / model is unknown.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -47,6 +48,67 @@ class LlmResponse:
 _url_cache: dict = {}
 _url_cache_ts: float = 0.0
 _URL_CACHE_TTL = 300  # seconds
+
+
+# ── /api/show metadata cache (Phase J β) ───────────
+_model_metadata_cache: dict[str, tuple[str, int]] = {}
+_model_metadata_lock = threading.Lock()
+
+
+def _strip_endpoint(url: str) -> str:
+    """`http://host:port/api/chat` → `http://host:port`. Idempotent on bare bases."""
+    for suffix in ("/api/chat", "/api/generate", "/api/show", "/api/tags"):
+        if url.endswith(suffix):
+            return url[: -len(suffix)]
+    return url
+
+
+def _get_model_metadata(model: str, base_url: str) -> tuple[str, int]:
+    """Return ``(digest, size_bytes)`` for ``model`` at ``base_url``.
+
+    Cached process-wide on first hit. On any failure (connection, HTTP,
+    parse) returns ``("", 0)`` — citation-grade fidelity is best-effort,
+    so a missing digest must never fail the LLM call itself.
+    """
+    with _model_metadata_lock:
+        cached = _model_metadata_cache.get(model)
+    if cached is not None:
+        return cached
+    digest, size_bytes = "", 0
+    try:
+        r = requests.post(f"{base_url}/api/show", json={"name": model}, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        digest = str(data.get("digest", "") or "")
+        size_bytes = int(data.get("size", 0) or 0)
+    except (requests.exceptions.RequestException, ConnectionError,
+            OSError, ValueError, TypeError):
+        digest, size_bytes = "", 0
+    with _model_metadata_lock:
+        _model_metadata_cache[model] = (digest, size_bytes)
+    return digest, size_bytes
+
+
+def _annotate_envelope(
+    envelope: dict[str, Any],
+    *,
+    model: str,
+    url: str,
+    agent_role: str,
+    response_text: str,
+) -> dict[str, Any]:
+    """Inject Phase J β citation-grade fields into the LlmResponse envelope.
+
+    State-hook reads these `_orchestrator_*` keys to populate LlmCallRecord
+    without a second network round-trip. ``url`` is the full endpoint URL
+    (e.g. /api/chat); we strip to base before looking up metadata.
+    """
+    digest, size_bytes = _get_model_metadata(model, _strip_endpoint(url))
+    envelope.setdefault("_orchestrator_digest", digest)
+    envelope.setdefault("_orchestrator_size_bytes", size_bytes)
+    envelope.setdefault("_orchestrator_response_text", response_text)
+    envelope.setdefault("_orchestrator_agent_role", agent_role)
+    return envelope
 
 
 def _refresh_url_cache():
@@ -102,7 +164,7 @@ def query_ollama_api(base_url: str, endpoint: str, timeout: int = 10):
     on_completion=[on_task_completion],
     on_failure=[on_task_completion],
 )
-def query_ollama(model, prompt, url, run_id) -> LlmResponse:
+def query_ollama(model, prompt, url, run_id, agent_role: str = "") -> LlmResponse:
     log(run_id, f"LLM request -> {model}")
     try:
         r = requests.post(
@@ -112,7 +174,12 @@ def query_ollama(model, prompt, url, run_id) -> LlmResponse:
         )
         r.raise_for_status()
         envelope = r.json()
-        return LlmResponse(text=envelope.get("response", ""), envelope=envelope)
+        text = envelope.get("response", "")
+        envelope = _annotate_envelope(
+            envelope, model=model, url=url,
+            agent_role=agent_role, response_text=text,
+        )
+        return LlmResponse(text=text, envelope=envelope)
     except requests.exceptions.Timeout:
         log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_GENERATE}s)")
         return LlmResponse(text="")
@@ -137,7 +204,8 @@ def query_ollama(model, prompt, url, run_id) -> LlmResponse:
     on_completion=[on_task_completion],
     on_failure=[on_task_completion],
 )
-def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_id) -> LlmResponse:
+def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_id,
+                             agent_role: str = "") -> LlmResponse:
     """Structured query with JSON-schema enforcement and temperature 0."""
     log(run_id, f"LLM structured request -> {model}")
     messages = []
@@ -160,6 +228,10 @@ def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_
         r.raise_for_status()
         envelope = r.json()
         content = envelope.get("message", {}).get("content", "")
+        envelope = _annotate_envelope(
+            envelope, model=model, url=url,
+            agent_role=agent_role, response_text=content,
+        )
         if not content:
             log(run_id, f"structured query returned empty content from {model}")
             return LlmResponse(envelope=envelope)

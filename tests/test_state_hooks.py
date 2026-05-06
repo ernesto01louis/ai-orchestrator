@@ -119,6 +119,59 @@ def test_task_completion_without_llm_call_tag_is_noop():
     assert LLM_CALL_LOG.drain("r5") == []
 
 
+def test_task_completion_captures_citation_grade_fields():
+    """Phase J β: hook reads call_id, server_url, response_text, started_at,
+    digest+size from envelope, agent_role from params."""
+    from datetime import datetime, timezone
+
+    from llm.ollama import LlmResponse
+    from prefect_io.state_hooks import on_task_completion
+
+    LLM_CALL_LOG.drain("rB")
+    started = datetime(2026, 5, 6, 12, 0, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 5, 6, 12, 0, 1, tzinfo=timezone.utc)
+
+    task = MagicMock()
+    task.tags = {"llm-call"}
+    task_run = MagicMock()
+    task_run.id = "task-uuid-xyz"
+    task_run.start_time = started
+    task_run.end_time = end
+    task_run.parameters = {
+        "model": "qwen2.5",
+        "messages": [{"role": "user", "content": "hi"}],
+        "options": {"temperature": 0.0},
+        "url": "http://192.168.2.13:11434/api/chat",
+        "run_id": "rB",
+        "agent_role": "judge",
+    }
+
+    fake = LlmResponse(
+        text="the answer is 42",
+        envelope={
+            "eval_count": 5,
+            "_orchestrator_digest": "sha256-x",
+            "_orchestrator_size_bytes": 1234567,
+            "_orchestrator_response_text": "the answer is 42",
+        },
+    )
+    state = MagicMock()
+    state.name = "Completed"
+    state.result = MagicMock(return_value=fake)
+
+    on_task_completion(task, task_run, state)
+    drained = LLM_CALL_LOG.drain("rB")
+    assert len(drained) == 1
+    out = drained[0]
+    assert out.call_id == "task-uuid-xyz"
+    assert out.agent_role == "judge"
+    assert out.server_url == "http://192.168.2.13:11434/api/chat"
+    assert out.response_text == "the answer is 42"
+    assert out.started_at == started
+    assert out.model_digest == "sha256-x"
+    assert out.model_size_bytes == 1234567
+
+
 def test_state_hooks_swallow_unexpected_exceptions(monkeypatch, caplog):
     """A broken hook must never propagate exceptions back into Prefect."""
     flow, flow_run, state = _mk_flow_ctx(run_id="r6")
