@@ -172,6 +172,8 @@ def test_status_manifest_status_none_when_not_completed(client):
 def test_status_404_unknown_run(client):
     resp = client.get("/status/nonexistent-run-uuid")
     assert resp.status_code == 404
+    assert "detail" in resp.json()
+    assert "nonexistent-run-uuid" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +226,8 @@ def test_run_verify_endpoint_404_unknown(client):
     """GET /runs/{nonexistent}/verify returns 404."""
     resp = client.get("/runs/nonexistent-uuid/verify")
     assert resp.status_code == 404
+    assert "detail" in resp.json()
+    assert "nonexistent-uuid" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +265,7 @@ def test_campaign_verify_merkle_endpoint_ok(tmp_path, client, monkeypatch):
 
     # Redirect the path constants used by the route handler.
     monkeypatch.setattr("api.routes.PROJECTS_DIR", str(projects_root))
-    monkeypatch.setattr("core.paths.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
+    monkeypatch.setattr("api.routes.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
 
     resp = client.get(f"/campaigns/{campaign_id}/verify-merkle")
 
@@ -288,7 +292,7 @@ def test_campaign_verify_merkle_endpoint_corrupted(tmp_path, client, monkeypatch
     manifest_path.write_bytes(manifest_path.read_bytes() + b"\x00")
 
     monkeypatch.setattr("api.routes.PROJECTS_DIR", str(projects_root))
-    monkeypatch.setattr("core.paths.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
+    monkeypatch.setattr("api.routes.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
 
     resp = client.get(f"/campaigns/{campaign_id}/verify-merkle")
 
@@ -306,3 +310,5 @@ def test_campaign_verify_merkle_endpoint_404_unknown(client):
     """GET /campaigns/{nonexistent}/verify-merkle returns 404."""
     resp = client.get("/campaigns/nonexistent/verify-merkle")
     assert resp.status_code == 404
+    assert "detail" in resp.json()
+    assert "nonexistent" in resp.json()["detail"]

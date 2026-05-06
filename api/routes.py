@@ -14,6 +14,7 @@ import shlex
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import requests
 from fastapi import (
@@ -58,6 +59,7 @@ from core.config import (
     VAULT_SYNC_ENABLED,
 )
 from core.paths import (
+    CAMPAIGN_TEMPLATES_DIR,
     CONFIG_PATH,
     GOALS_FILE,
     IDENTITY_FILE,
@@ -394,7 +396,7 @@ def get_files(run_id: str):
 
 
 @router.get("/runs/{run_id}/verify")
-def verify_run(run_id: str):
+def verify_run(run_id: str) -> dict[str, Any]:
     """Force a manifest integrity check for a completed run.
 
     Re-hashes every tracked artifact against the stored manifest.json
@@ -410,7 +412,17 @@ def verify_run(run_id: str):
     project = info.get("project", "")
     run_dir = Path(PROJECTS_DIR) / project / "runs" / run_id
 
-    result = verify_run_manifest(run_dir)
+    try:
+        result = verify_run_manifest(run_dir)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("verify_run_manifest failed for %s: %s", run_id, exc)
+        RUN_STATUS[run_id]["manifest_status"] = "skipped"
+        return {
+            "run_id": run_id,
+            "valid": False,
+            "status": "skipped",
+            "mismatches": [f"verify failed: {exc}"],
+        }
 
     RUN_STATUS[run_id]["manifest_status"] = result.status
 
@@ -2335,7 +2347,7 @@ def refresh_evidence(campaign_id: str):
 
 
 @router.get("/campaigns/{campaign_id}/verify-merkle")
-def verify_campaign_merkle_route(campaign_id: str):
+def verify_campaign_merkle_route(campaign_id: str) -> dict[str, Any]:
     """Re-validate the campaign Merkle root against all per-run manifest.json files.
 
     Re-hashes every run's manifest.json and rebuilds the Merkle tree to compare
@@ -2346,12 +2358,21 @@ def verify_campaign_merkle_route(campaign_id: str):
     """
     _campaign_or_404(campaign_id)
 
-    from core.paths import CAMPAIGN_TEMPLATES_DIR
-
     campaign_dir = CAMPAIGN_TEMPLATES_DIR / campaign_id
     projects_root = Path(PROJECTS_DIR)
 
-    result = verify_campaign_merkle(campaign_dir, projects_root)
+    try:
+        result = verify_campaign_merkle(campaign_dir, projects_root)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("verify_campaign_merkle failed for %s: %s", campaign_id, exc)
+        with _campaign_status_lock:
+            CAMPAIGN_STATUS.setdefault(campaign_id, {})["manifest_status"] = "skipped"
+        return {
+            "campaign_id": campaign_id,
+            "valid": False,
+            "status": "skipped",
+            "mismatches": [f"verify failed: {exc}"],
+        }
 
     with _campaign_status_lock:
         CAMPAIGN_STATUS.setdefault(campaign_id, {})["manifest_status"] = result.status
