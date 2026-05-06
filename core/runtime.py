@@ -134,11 +134,27 @@ def _update_run_status(run_id: str, **kwargs) -> None:
 
 
 def _init_run_status(run_id: str, **kwargs) -> None:
-    """Thread-safe initialization of a new run entry."""
+    """Thread-safe initialization of a new run entry.
+
+    Fields:
+      phase                  str   — current lifecycle phase / last log message
+      score                  float — best score achieved (0–10)
+      completed              bool  — True once the run reaches a terminal state
+      result                 dict | None — final result payload on success
+      error                  str | None  — error message on failure
+      _judge_primary_down    bool  — True if the primary judge LLM was unreachable
+      manifest_status        Literal["ok","corrupted","missing","skipped"] | None
+                             — "ok": manifest.json written and hashes verified
+                             — "corrupted": manifest written but hashes don't match
+                             — "missing": manifest.json absent after run
+                             — "skipped": write attempted but failed (non-fatal)
+                             — None: not yet attempted (run still in progress)
+    """
     with _run_status_lock:
         RUN_STATUS[run_id] = {
             "phase": "queued", "score": 0, "completed": False,
             "result": None, "error": None, "_judge_primary_down": False,
+            "manifest_status": None,
             **kwargs,
         }
 

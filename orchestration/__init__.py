@@ -96,6 +96,7 @@ from tools import run_tools
 from gates import consolidate_lessons
 from dream import run_dream
 import llm.ollama as _llm_ollama  # for _url_cache access
+from manifest import write_run_manifest
 
 # Run counter for auto-dream trigger
 _run_counter_since_dream = 0
@@ -1539,6 +1540,16 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 _run_counter_since_dream = 0
             except Exception as e:
                 log(run_id, f"dream auto-trigger failed (non-fatal): {e}")
+
+        # Write per-run SHA256 manifest (Phase 1.5 Phase B).
+        # Must run after all artifact writes and before terminal status update.
+        try:
+            write_run_manifest(run_dir, run_id=run_id)
+            _update_run_status(run_id, manifest_status="ok")
+            log(run_id, "manifest: SHA256 manifest written")
+        except Exception as exc:
+            log(run_id, f"manifest write failed (non-fatal): {exc}")
+            _update_run_status(run_id, manifest_status="skipped")
 
         _update_run_status(run_id, completed=True, score=best_score, result={
             "run_id": run_id,
