@@ -64,13 +64,16 @@ def test_prefect_server_health():
 # ---------------------------------------------------------------------------
 
 
-def test_orchestrate_flow_against_real_server(mock_ollama):
+def test_orchestrate_flow_against_real_server():
     """Run a tiny orchestrate flow; verify it appears in the server's flow_runs list.
 
     Agent functions are patched at the orchestration module level (same approach
     as tests/test_orchestrate_flow.py) to avoid needing a real Ollama server or
-    SSH sandbox.  The Prefect client is pointed at the real server via the
-    ``_real_server_settings`` autouse fixture in this directory's conftest.
+    SSH sandbox — every code path that would call llm.ollama.requests.post is
+    short-circuited by patching planner_agent.fn / generate_candidate.fn /
+    sandbox_execute, so mock_ollama is unnecessary here. The Prefect client is
+    pointed at the real server via the ``_real_server_settings`` autouse fixture
+    in this directory's conftest.
     """
     from orchestration import OrchestrateRequest, run_orchestration
 

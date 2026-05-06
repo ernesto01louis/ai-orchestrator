@@ -125,9 +125,15 @@ Per-target identity (`memory/targets/<name>.md`) and goals
 
 ```
 POST /orchestrate
-  → api.routes._orchestrate_handler
+  → api.routes.orchestrate
   → prefect_io.submit_orchestration(req, run_id)
-  → submit_run_orchestration_to_prefect (in_process mode → daemon thread runs the @flow)
+    in_process mode (default) → daemon thread runs run_orchestration (the @flow,
+                                Prefect engine drives state hooks)
+    deployment mode          → prefect.deployments.run_deployment enqueues;
+                                the systemd prefect-worker.service executes
+    server-down fallback     → daemon thread runs run_orchestration.fn (bypasses
+                                Prefect entirely; inline _update_run_status() calls
+                                keep the WebSocket UI alive)
   → run_orchestration(req, run_id)  # Prefect @flow
     on_running hook: capture flow_run.id into RUN_STATUS[run_id]["flow_run_id"]
     @task agent functions execute (planner, judge, generator.map(...), optimizer, troubleshoot)
