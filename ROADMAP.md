@@ -108,7 +108,15 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 - [x] Standalone Python verifier (`python -m evidence.verify
       --crate-dir`) — pure stdlib + PyNaCl, no orchestrator runtime needed
 - [x] 32 new tests (schema, rocrate, signing, calculators, e2e); 71/71 green
-- [ ] *Deferred to 1.2.1*: HTML viewer (Snakemake-style single-page)
+- [x] *Phase 1.2.1 shipped 2026-05-06*: self-contained HTML viewer at
+      `evidence/html_viewer.py` — `build_html(bundle)` returns a single page
+      with bundle JSON embedded as `<script type="application/json">`,
+      vanilla JS rendering, all CSS inline. Builder emits `evidence.html`
+      alongside `evidence.json` so it's covered by the signed manifest.
+      Renders header/hypothesis, fingerprints, LLM targets, runs (with
+      drill-down LLM calls and code executions), calculators, REFORMS +
+      NeurIPS responses, model cards, datasheets, artifacts. No CDN
+      dependency — works under `file://`.
 - [x] *Closed in 1.3 (Scope α)*: per-LLM-call telemetry capture — `LLM_CALL_LOG`
       buffer populated by Prefect `on_task_completion` state hook for tasks
       tagged `"llm-call"`; drained per run in `evidence/builder.py` into

@@ -189,6 +189,7 @@ class _BundleBuilder:
         # signed envelope in a sibling file is also how RO-Crate /
         # in-toto consumers expect to find it.
         self._write_evidence_json(bundle)
+        self._write_evidence_html(bundle)
         self._write_rocrate(bundle)
         self._write_readme(bundle)
         self._write_public_key()
@@ -504,6 +505,15 @@ class _BundleBuilder:
     def _write_evidence_json(self, bundle: EvidenceBundle) -> None:
         path = self.crate_dir / "evidence.json"
         path.write_bytes(canonical_json(bundle.model_dump(by_alias=True, mode="json")))
+
+    def _write_evidence_html(self, bundle: EvidenceBundle) -> None:
+        """Phase 1.2.1 — emit a self-contained ``evidence.html`` viewer
+        next to ``evidence.json``. Lives in the crate dir before
+        ``_build_statement`` walks it, so the manifest covers it.
+        """
+        from evidence.html_viewer import build_html
+        path = self.crate_dir / "evidence.html"
+        path.write_text(build_html(bundle), encoding="utf-8")
 
     def _write_rocrate(self, bundle: EvidenceBundle) -> None:
         path = self.crate_dir / "ro-crate-metadata.json"
