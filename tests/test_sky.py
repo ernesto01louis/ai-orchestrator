@@ -18,7 +18,11 @@ from core import config, sky
 @pytest.fixture(autouse=True)
 def _reset_sky() -> Iterator[None]:
     sky.reset_for_tests()
+    sky.stop_idle_stop_daemon()
+    sky._idle_daemon_thread = None
     yield
+    sky.stop_idle_stop_daemon()
+    sky._idle_daemon_thread = None
     sky.reset_for_tests()
 
 
@@ -315,3 +319,141 @@ def test_cost_report_swallows_sdk_failure(
     fake_sdk.cost_report.side_effect = RuntimeError("boom")
     monkeypatch.setattr(sky, "_try_import_sky", lambda: fake_sdk)
     assert sky.cost_report_for_cluster("c-1") == 1.0
+
+
+# ---------------------------------------------------------------------------
+# idle_stop_pass — Phase 2.5.4 failsafe
+# ---------------------------------------------------------------------------
+
+
+def test_idle_stop_pass_noop_when_disabled(disabled_sky: None) -> None:
+    sky.register_burst("r-1", _handle("c-1"))
+    assert sky.idle_stop_pass() == []
+    # Registry untouched
+    assert len(sky.list_registered_bursts()) == 1
+
+
+def test_idle_stop_pass_noop_when_timeout_zero(
+    enabled_sky: MagicMock, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """timeout=0 means operators want manual control."""
+    from core import config  # noqa: PLC0415
+    monkeypatch.setattr(config, "SKY_IDLE_TIMEOUT_MINUTES", 0, raising=False)
+    sky.register_burst("r-1", _handle("c-1"))
+    assert sky.idle_stop_pass() == []
+
+
+def test_idle_stop_pass_skips_active_burst(
+    enabled_sky: MagicMock, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A burst whose ``last_use`` is recent is left alone."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    from core import config  # noqa: PLC0415
+    monkeypatch.setattr(config, "SKY_IDLE_TIMEOUT_MINUTES", 30, raising=False)
+
+    sky.register_burst("r-1", _handle("c-1"))
+    recent = datetime.now(timezone.utc).isoformat()
+    enabled_sky.status.return_value = [
+        {"name": "c-1", "status": "UP", "cloud": "RunPod", "last_use": recent},
+    ]
+    assert sky.idle_stop_pass() == []
+    enabled_sky.stop.assert_not_called()
+
+
+def test_idle_stop_pass_stops_idle_burst(
+    enabled_sky: MagicMock, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A burst idle past ``idle_timeout_minutes`` gets stopped + deregistered."""
+    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+
+    from core import config  # noqa: PLC0415
+    monkeypatch.setattr(config, "SKY_IDLE_TIMEOUT_MINUTES", 30, raising=False)
+
+    sky.register_burst("r-1", _handle("c-1", cost=2.5))
+    long_ago = (
+        datetime.now(timezone.utc) - timedelta(minutes=60)
+    ).isoformat()
+    enabled_sky.status.return_value = [
+        {"name": "c-1", "status": "UP", "cloud": "RunPod", "last_use": long_ago},
+    ]
+    enabled_sky.cost_report.return_value = []  # falls back to estimate
+
+    stopped = sky.idle_stop_pass()
+    assert stopped == ["c-1"]
+    enabled_sky.stop.assert_called_once_with("c-1")
+    # Deregistered.
+    assert sky.list_registered_bursts() == []
+
+
+def test_idle_stop_pass_no_last_use_skips(
+    enabled_sky: MagicMock, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Conservative: missing ``last_use`` is treated as not-yet-idle."""
+    from core import config  # noqa: PLC0415
+    monkeypatch.setattr(config, "SKY_IDLE_TIMEOUT_MINUTES", 30, raising=False)
+
+    sky.register_burst("r-1", _handle("c-1"))
+    enabled_sky.status.return_value = [
+        {"name": "c-1", "status": "INIT", "cloud": "RunPod", "last_use": ""},
+    ]
+    assert sky.idle_stop_pass() == []
+
+
+def test_idle_stop_pass_isolates_per_cluster_failures(
+    enabled_sky: MagicMock, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One cluster's status / stop failure must not stop the loop."""
+    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+
+    from core import config  # noqa: PLC0415
+    monkeypatch.setattr(config, "SKY_IDLE_TIMEOUT_MINUTES", 30, raising=False)
+
+    sky.register_burst("r-1", _handle("c-broken"))
+    sky.register_burst("r-2", _handle("c-good"))
+    long_ago = (
+        datetime.now(timezone.utc) - timedelta(minutes=60)
+    ).isoformat()
+
+    def _status(cluster_names=None, refresh=False):
+        if cluster_names == ["c-broken"]:
+            raise RuntimeError("status failed")
+        if cluster_names == ["c-good"]:
+            return [
+                {"name": "c-good", "status": "UP",
+                 "cloud": "RunPod", "last_use": long_ago},
+            ]
+        return []
+
+    enabled_sky.status.side_effect = _status
+    enabled_sky.cost_report.return_value = []
+
+    stopped = sky.idle_stop_pass()
+    assert stopped == ["c-good"]
+    # broken cluster is still registered (we didn't try to stop what we couldn't query).
+    names = [b["cluster_name"] for b in sky.list_registered_bursts()]
+    assert names == ["c-broken"]
+
+
+# ---------------------------------------------------------------------------
+# start_idle_stop_daemon — idempotency + dormant no-op
+# ---------------------------------------------------------------------------
+
+
+def test_start_idle_stop_daemon_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two calls back-to-back must produce one thread."""
+    started: list[object] = []
+    real_thread = __import__("threading").Thread
+
+    def capturing_ctor(*args, **kwargs):
+        t = real_thread(*args, **kwargs)
+        started.append(t)
+        return t
+
+    monkeypatch.setattr("core.sky.threading.Thread", capturing_ctor)
+    sky.start_idle_stop_daemon(poll_interval_seconds=600)
+    sky.start_idle_stop_daemon(poll_interval_seconds=600)
+    sky.stop_idle_stop_daemon()
+    assert len(started) == 1

@@ -368,6 +368,142 @@ def list_registered_bursts() -> list[dict[str, Any]]:
         ]
 
 
+def idle_stop_pass() -> list[str]:
+    """One pass of the idle-stop failsafe.
+
+    For every cluster in ``BURSTS``, query its status; if the cluster
+    has been idle for ``SKY_IDLE_TIMEOUT_MINUTES``, stop it,
+    deregister, and accrue actual cost to the parent campaign. Returns
+    the list of cluster_names that were stopped this pass — caller
+    (the daemon loop, tests) can use this for assertions / logging.
+
+    Always safe to call: no-op when SkyPilot is dormant or the
+    registry is empty. Per-cluster errors are swallowed so one
+    misbehaving cluster doesn't stall the loop.
+    """
+    if not is_enabled():
+        return []
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    from core import config  # noqa: PLC0415
+
+    timeout_minutes = max(0, int(config.SKY_IDLE_TIMEOUT_MINUTES))
+    if timeout_minutes == 0:
+        # Operators who set 0 disable idle-stop entirely.
+        return []
+
+    stopped: list[str] = []
+    with _burst_lock:
+        candidates = list(BURSTS.keys())
+    now = datetime.now(timezone.utc)
+
+    for cluster_name in candidates:
+        try:
+            status = status_burst(cluster_name)
+        except Exception as exc:
+            _logger.warning(
+                "sky_idle_stop_status_failed cluster=%s error=%s",
+                cluster_name, exc,
+            )
+            continue
+        if not _is_idle(status, now, timeout_minutes):
+            continue
+        try:
+            actual_cost = cost_report_for_cluster(cluster_name)
+            stop_burst(cluster_name)
+        except Exception as exc:
+            _logger.warning(
+                "sky_idle_stop_failed cluster=%s error=%s",
+                cluster_name, exc,
+            )
+            continue
+        entry = unregister_burst(cluster_name)
+        run_id = entry["run_id"] if entry else None
+        if run_id:
+            try:
+                from core.budget import accrue_to_campaign  # noqa: PLC0415
+                accrue_to_campaign(run_id, float(actual_cost))
+            except Exception:  # pragma: no cover — defensive
+                pass
+        stopped.append(cluster_name)
+        _logger.info(
+            "sky_idle_stop_executed cluster=%s actual_cost_usd=%.4f",
+            cluster_name, actual_cost,
+        )
+
+    return stopped
+
+
+def _is_idle(
+    status: dict[str, Any], now: Any, timeout_minutes: int
+) -> bool:
+    """Decide whether a cluster has been idle long enough to stop.
+
+    Conservative: any parse failure on ``last_use`` returns False so
+    a flaky timestamp doesn't trigger an unintended stop.
+    """
+    from datetime import datetime, timedelta  # noqa: PLC0415
+
+    last_use_raw = status.get("last_use")
+    if not last_use_raw:
+        return False
+    try:
+        last_use = datetime.fromisoformat(str(last_use_raw))
+    except (TypeError, ValueError):
+        return False
+    if last_use.tzinfo is None:
+        last_use = last_use.replace(tzinfo=now.tzinfo)
+    return (now - last_use) >= timedelta(minutes=timeout_minutes)
+
+
+_idle_daemon_thread: threading.Thread | None = None
+_idle_daemon_lock = threading.Lock()
+_idle_daemon_stop = threading.Event()
+
+
+def start_idle_stop_daemon(poll_interval_seconds: int = 60) -> None:
+    """Start the daemon thread that runs ``idle_stop_pass`` periodically.
+
+    Idempotent — calling twice is a no-op. No-op when SkyPilot is
+    dormant; the daemon will simply re-evaluate ``is_enabled()`` on
+    each pass and exit cleanly when the operator flips the flag back
+    to false.
+    """
+    global _idle_daemon_thread
+    with _idle_daemon_lock:
+        if _idle_daemon_thread is not None and _idle_daemon_thread.is_alive():
+            return
+        _idle_daemon_stop.clear()
+
+        def _loop() -> None:
+            _logger.info(
+                "sky_idle_daemon_started poll_interval=%ss",
+                poll_interval_seconds,
+            )
+            while not _idle_daemon_stop.wait(poll_interval_seconds):
+                try:
+                    idle_stop_pass()
+                except Exception as exc:  # pragma: no cover — defensive
+                    _logger.warning("sky_idle_daemon_pass_failed error=%s", exc)
+
+        thread = threading.Thread(
+            target=_loop,
+            name="sky-idle-stop-daemon",
+            daemon=True,
+        )
+        _idle_daemon_thread = thread
+        thread.start()
+
+
+def stop_idle_stop_daemon() -> None:
+    """Signal the daemon to exit at the next poll boundary.
+
+    Used by tests + clean shutdown paths. Safe to call when the
+    daemon was never started.
+    """
+    _idle_daemon_stop.set()
+
+
 def cost_report_for_cluster(cluster_name: str) -> float:
     """Best-effort actual-cost lookup for a cluster.
 

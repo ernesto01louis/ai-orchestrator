@@ -154,6 +154,17 @@ async def _lifespan(app_instance):
         init_tracing(app)
     except Exception as e:
         print(f"WARNING: OpenTelemetry init failed at startup: {e}")
+
+    # Phase 2.5 cloud-burst idle-stop daemon. Polls every minute
+    # and stops clusters that have been idle longer than
+    # ``sky.idle_timeout_minutes``. No-op when ``sky.enabled=false``;
+    # the daemon will exit on its next pass if the operator flips
+    # the flag back. Idempotent.
+    try:
+        from core.sky import start_idle_stop_daemon  # noqa: PLC0415
+        start_idle_stop_daemon()
+    except Exception as e:
+        print(f"WARNING: SkyPilot idle-stop daemon failed to start: {e}")
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield
