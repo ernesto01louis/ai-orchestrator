@@ -140,5 +140,14 @@
       "default": {"prompt": 0.0, "completion": 0.0}
     },
     "thresholds_pct": [50, 80, 100]
+  },
+  "sky": {
+    "_comment": "Phase 2.5 SkyPilot cloud-burst. Ships dormant. Set enabled=true after configuring at least one cloud provider (e.g. RUNPOD_API_KEY in .env, then `sky check`). idle_timeout_minutes auto-stops idle clusters; max_burst_cost_usd is the per-burst safety ceiling.",
+    "enabled": false,
+    "default_cloud": "runpod",
+    "default_accelerator": "A10:1",
+    "yaml_dir": "sky",
+    "idle_timeout_minutes": 30,
+    "max_burst_cost_usd": 5.0
   }
 }

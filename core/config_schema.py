@@ -171,6 +171,41 @@ class PostgresConfig(_FlexModel):
     reconcile_on_startup: bool = True
 
 
+class SkyConfig(_FlexModel):
+    """Phase 2.5 SkyPilot cloud-burst configuration.
+
+    All defaults make ``sky.enabled=False`` the dormant state — every
+    entry point in ``core.sky`` exits before contacting any provider
+    until the operator both flips ``enabled`` and sets up provider
+    credentials per the SkyPilot docs (e.g. ``runpod login`` or
+    ``RUNPOD_API_KEY`` in ``.env``).
+
+    ``yaml_dir`` points at the orchestrator-managed pool of YAML specs
+    (``sky/llm-burst.yaml`` etc.). ``idle_timeout_minutes`` is the
+    safety net for the 2.5.4 idle-stop daemon — clusters with no
+    activity for this long get auto-stopped to bound cost. ``max_burst_
+    cost_usd`` lets operators cap individual bursts (independent of
+    the per-campaign Phase 2.4 budget).
+    """
+
+    enabled: bool = False
+    # Default cloud — accepted by ``sky launch -c``. Common choices:
+    # ``runpod``, ``vast``, ``aws``, ``gcp``. Per-spec overrides win.
+    default_cloud: str = "runpod"
+    # Default GPU accelerator string (matches sky.Resources(accelerators=...)).
+    default_accelerator: str = "A10:1"
+    # Working dir on the orchestrator that the burst route looks in for
+    # named YAML specs.
+    yaml_dir: str = "sky"
+    # Minutes a burst can sit idle before the failsafe stops it. Set
+    # to 0 to disable idle-stop (operators who want manual control).
+    idle_timeout_minutes: int = 30
+    # Per-burst USD ceiling. Independent of the campaign budget — the
+    # burst is rejected at launch time if its requested resources
+    # exceed this estimate.
+    max_burst_cost_usd: float = 5.0
+
+
 class BudgetRate(_FlexModel):
     """Per-model cost rate. Both numbers are USD per 1M tokens.
 
@@ -280,3 +315,4 @@ class OrchestratorSettings(_FlexModel):
     redis: RedisConfig = RedisConfig()
     otel: OTelConfig = OTelConfig()
     budget: BudgetConfig = BudgetConfig()
+    sky: SkyConfig = SkyConfig()

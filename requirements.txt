@@ -139,3 +139,13 @@ dvc[ssh]>=3.67,<4
 # without a separate dependency. Alembic for migrations.
 psycopg[binary,pool]>=3.2,<4
 alembic>=1.13,<2
+
+# Phase 2.5 — SkyPilot for cloud-burst GPU. Ships dormant
+# (sky.enabled=false default); operators add provider API keys to .env
+# and flip the flag to launch real bursts. Range pin with [runpod,vast]
+# extras — transitive resolution lets pip pick compatible boto3 /
+# pandas / lxml versions without adding 30+ exact pins to this file.
+# NOTE: skypilot pulls websockets<17 which downgrades from prefect's
+# preferred 15.0.1+ (prefect raises a non-fatal warning at pip-install
+# time but functions correctly with 13.x — verified 2026-05-07).
+skypilot[runpod,vast]>=0.12,<0.13
