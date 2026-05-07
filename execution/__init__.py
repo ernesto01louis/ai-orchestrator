@@ -37,7 +37,10 @@ def verify_local(code, command_args, tmp_path):
     """Try to verify locally. Raises FileNotFoundError if tool missing."""
     with open(tmp_path, "w") as f:
         f.write(code)
-    r = subprocess.run(command_args, capture_output=True, text=True, timeout=30)
+    try:
+        r = subprocess.run(command_args, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return False, "verification timed out after 30s"
     if r.returncode != 0:
         return False, r.stderr
     return True, ""
@@ -410,20 +413,23 @@ def deploy_file(local, remote, target):
 
     cfg = SSH_TARGETS[target]
 
-    r = subprocess.run(
-        [
-            "scp",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", f"ConnectTimeout={SSH_TIMEOUT}",
-            "-i",
-            cfg["key_path"],
-            local,
-            f"{cfg['username']}@{cfg['host']}:{remote}"
-        ],
-        capture_output=True,
-        text=True,
-        timeout=SSH_TIMEOUT + 30
-    )
+    try:
+        r = subprocess.run(
+            [
+                "scp",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", f"ConnectTimeout={SSH_TIMEOUT}",
+                "-i",
+                cfg["key_path"],
+                local,
+                f"{cfg['username']}@{cfg['host']}:{remote}"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=SSH_TIMEOUT + 30
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"SCP timed out after {SSH_TIMEOUT + 30}s")
 
     if r.returncode != 0:
         raise RuntimeError(f"SCP failed ({r.returncode}): {r.stderr.strip()}")

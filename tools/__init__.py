@@ -118,7 +118,7 @@ def execute_tool(tool_name, args, target, run_id):
                 if r.returncode != 0:
                     record_runtime_failure(cmd, output[:300], tool_name, run_id)
                 return output
-            except Exception as e:
+            except (subprocess.SubprocessError, OSError) as e:
                 record_runtime_failure(cmd, str(e), tool_name, run_id)
                 return f"[error] {e}"
 
