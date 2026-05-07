@@ -171,9 +171,20 @@ def test_cli_rotate_logs_dry_run(tmp_path: Path, capsys: pytest.CaptureFixture[s
     assert "would gzip" in captured.out
 
 
-def test_daemon_thread_starts_and_is_daemon(tmp_path: Path) -> None:
+def test_daemon_thread_starts_and_is_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """start_rotation_daemon returns a live daemon thread."""
+    # conftest.py disables the daemon globally to avoid touching real LOG_DIR
+    # during TestClient lifespan; this test explicitly opts back in.
+    monkeypatch.delenv("AI_ORCHESTRATOR_DISABLE_LOG_ROTATION", raising=False)
     thread = start_rotation_daemon(tmp_path, interval_seconds=9999)
+    assert thread is not None
     assert thread.is_alive()
     assert thread.daemon
     assert thread.name == "log-rotation"
+
+
+def test_daemon_skipped_when_env_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """start_rotation_daemon returns None when AI_ORCHESTRATOR_DISABLE_LOG_ROTATION=1."""
+    monkeypatch.setenv("AI_ORCHESTRATOR_DISABLE_LOG_ROTATION", "1")
+    thread = start_rotation_daemon(tmp_path, interval_seconds=9999)
+    assert thread is None

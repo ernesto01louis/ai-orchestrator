@@ -126,14 +126,22 @@ def start_rotation_daemon(
     interval_seconds: int = 86400,  # 24 hours
     gzip_after_days: int = 1,
     delete_after_days: int = 90,
-) -> threading.Thread:
+) -> "threading.Thread | None":
     """Start a daemon thread that runs :func:`rotate_logs` once at startup,
     then every *interval_seconds*.
 
     Returns the thread handle (callers don't normally need it; exposed for
     tests).  Errors are caught and printed to *stderr* so a transient FS
     error never kills the thread.
+
+    Honors ``AI_ORCHESTRATOR_DISABLE_LOG_ROTATION=1`` — set in tests' conftest
+    so TestClient lifespan doesn't gzip the dev ``logs/`` directory as a
+    silent side effect of importing the FastAPI app. Returns ``None`` when
+    disabled.
     """
+    if os.environ.get("AI_ORCHESTRATOR_DISABLE_LOG_ROTATION", "").lower() in ("1", "true", "yes"):
+        return None
+
     def _loop() -> None:
         while True:
             try:

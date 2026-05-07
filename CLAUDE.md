@@ -320,6 +320,8 @@ config validation (Pydantic), URL cache single-flight, subprocess
 atomic commits on `feat/phase1.8-ops-hardening`, +43 tests (203 → 246),
 ruff + mypy --strict clean on all touched files. Bearer-token auth
 from Phase 1.7 still gates everything except `/health`, `/metrics`,
-`/openapi.json`, `/docs`, `/redoc`. When you complete a phase or
+`/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc` (the
+six-entry public-path bypass set in `core/auth.DEFAULT_PUBLIC_PATHS`).
+When you complete a phase or
 significantly change architecture, update this file before starting
 the next work item.*
