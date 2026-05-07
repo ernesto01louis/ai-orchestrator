@@ -112,3 +112,10 @@ prefect>=3.0,<4
 # asyncssh / sshfs so DVC can push/pull through the dvc-orchestrator user
 # on the TrueNAS pool over SSH (no CIFS dependency).
 dvc[ssh]>=3.67,<4
+
+# Phase 2.1 — Postgres durable system-of-record. SQLAlchemy 2.0.47 above
+# is reused (sync engine). psycopg 3.x [binary] ships manylinux wheels so
+# no compile is needed in the LXC; [pool] gives us connection pooling
+# without a separate dependency. Alembic for migrations.
+psycopg[binary,pool]>=3.2,<4
+alembic>=1.13,<2
