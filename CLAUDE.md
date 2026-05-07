@@ -212,7 +212,15 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
 1.5 SHA256 artifact manifests — DONE (v0.1.5-phase1.5): per-run SHA256
     manifest.json + per-campaign Merkle merkle.json, lazy verify-on-read,
     `orchestrator` CLI, +46 unit/hook/route/cli tests (167 total).
-1.6 **Python client library** (separate `ai-orchestrator-client` package)
+1.6 Python client library — DONE in-tree (2026-05-07): separate repo at
+    `/opt/ai-orchestrator-client/`, 22 commits on `main`, `0.1.0a0`
+    version. Sync + async clients with full HTTP surface, `/ws` log
+    streaming, `Campaign.iter_runs(client)` polling generator, typed
+    Pydantic mirrors with OpenAPI drift check, BearerTokenAuth shell.
+    133 tests (ruff + mypy --strict + pytest), GitHub Actions CI matrix,
+    Trusted-Publishing release workflow. PyPI publish pending operator
+    (register publisher + push GitHub remote + push `v0.1.0a0` tag — see
+    `/opt/ai-orchestrator-client/RELEASING.md`).
 1.7 MCP contract hardening (version, auth, documented tools)
 1.8 Op fixes (URL cache single-flight, log rotation, config validation,
     Prometheus metrics)
@@ -262,7 +270,9 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-06, Phase 1.5 shipped (per-run SHA256 manifests +
-campaign Merkle root + verify endpoints + CLI). When you complete a phase
+*Last updated: 2026-05-07, Phase 1.6 shipped in-tree (Python client SDK
+`ai-orchestrator-client` at `/opt/ai-orchestrator-client/`, version
+`0.1.0a0`, 22 commits on `main`). PyPI publish pending operator action
+per `/opt/ai-orchestrator-client/RELEASING.md`. When you complete a phase
 or significantly change architecture, update this file before starting the
 next work item.*

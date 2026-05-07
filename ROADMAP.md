@@ -194,13 +194,20 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 - [x] Verify on read; mark corrupted on mismatch
 - [x] CLI tool: `orchestrator verify-run <run_id>`
 
-### 1.6 Python client library — PRIMARY CONSUMER CONTRACT
-- [ ] Create separate repo `ai-orchestrator-client`
-- [ ] Sync + async `OrchestratorClient`
-- [ ] Methods: `run`, `start_campaign`, `wait_for_completion`
-- [ ] `Campaign.iter_runs()` streaming
-- [ ] Auth hooks (API tokens)
-- [ ] Published to PyPI
+### 1.6 Python client library — DONE (in-tree at `/opt/ai-orchestrator-client/`, 2026-05-07; PyPI publish pending operator action)
+- [x] Create separate repo `ai-orchestrator-client` (22 commits on `main`)
+- [x] Sync + async `OrchestratorClient` / `AsyncOrchestratorClient` with method parity
+- [x] Methods: `run`, `start_campaign`, `wait_for_completion`, plus full
+      campaign/evidence/verify surface and idempotent control
+- [x] `Campaign.iter_runs(client)` streaming (sync + async dispatch on type)
+- [x] Async `iter_logs(run_id)` via `/ws` (Phase F)
+- [x] Auth hooks: `AuthProvider` Protocol + `BearerTokenAuth` shell
+      (no-op vs Phase 1.6 server, honored by Phase 1.7 unchanged)
+- [x] 133 tests (ruff + mypy --strict + pytest), CI matrix py3.11+3.12,
+      Trusted-Publishing release workflow ready
+- [ ] Published to PyPI — gated on operator: register Trusted Publisher
+      on PyPI, push GitHub remote, push `v0.1.0a0` tag (see
+      `/opt/ai-orchestrator-client/RELEASING.md`)
 
 ### 1.7 MCP contract hardening
 - [ ] Document all MCP tools at `/mcp`
