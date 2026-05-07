@@ -1,11 +1,12 @@
-"""orchestrator CLI — verify-run and verify-campaign."""
+"""orchestrator CLI — verify-run, verify-campaign, rotate-logs."""
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
-from core.paths import CAMPAIGN_TEMPLATES_DIR, PROJECTS_DIR
+from core.log_rotation import rotate_logs
+from core.paths import CAMPAIGN_TEMPLATES_DIR, LOG_DIR, PROJECTS_DIR
 from manifest import verify_campaign_merkle, verify_run_manifest
 
 
@@ -70,6 +71,47 @@ def _cmd_verify_campaign(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_rotate_logs(args: argparse.Namespace) -> int:
+    log_dir = Path(args.log_dir) if args.log_dir else Path(LOG_DIR)
+    dry_run: bool = args.dry_run
+
+    if dry_run:
+        # Walk without modifying; report what would happen.
+        from datetime import datetime  # noqa: PLC0415
+
+        summary = rotate_logs(
+            log_dir,
+            gzip_after_days=args.gzip_after_days,
+            delete_after_days=args.delete_after_days,
+            now=datetime.utcnow(),
+            dry_run=True,
+        )
+        for p in summary.gzipped:
+            print(f"would gzip: {p}")
+        for p in summary.deleted:
+            print(f"would delete: {p}")
+        for e in summary.errors:
+            print(f"error: {e}", file=sys.stderr)
+        print(
+            f"dry-run complete: {len(summary.gzipped)} would gzip, "
+            f"{len(summary.deleted)} would delete"
+        )
+        return 0
+
+    summary = rotate_logs(
+        log_dir,
+        gzip_after_days=args.gzip_after_days,
+        delete_after_days=args.delete_after_days,
+    )
+    print(
+        f"rotation complete: {len(summary.gzipped)} gzipped, "
+        f"{len(summary.deleted)} deleted, {len(summary.errors)} errors"
+    )
+    for e in summary.errors:
+        print(f"  error: {e}", file=sys.stderr)
+    return 1 if summary.errors else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="orchestrator",
@@ -99,6 +141,34 @@ def main(argv: list[str] | None = None) -> int:
         help=f"override projects directory (default: {PROJECTS_DIR})",
     )
     p_camp.set_defaults(func=_cmd_verify_campaign)
+
+    p_rotate = sub.add_parser(
+        "rotate-logs",
+        help="rotate logs in LOG_DIR (gzip >1d, delete >90d)",
+    )
+    p_rotate.add_argument(
+        "--log-dir",
+        default=None,
+        help=f"override log directory (default: {LOG_DIR})",
+    )
+    p_rotate.add_argument(
+        "--gzip-after-days",
+        type=int,
+        default=1,
+        help="gzip .log files older than this many days (default: 1)",
+    )
+    p_rotate.add_argument(
+        "--delete-after-days",
+        type=int,
+        default=90,
+        help="delete .log.gz files older than this many days (default: 90)",
+    )
+    p_rotate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would happen without modifying any files",
+    )
+    p_rotate.set_defaults(func=_cmd_rotate_logs)
 
     args = parser.parse_args(argv)
     return args.func(args)

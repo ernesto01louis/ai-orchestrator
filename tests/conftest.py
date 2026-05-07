@@ -22,6 +22,12 @@ from prefect.testing.utilities import prefect_test_harness
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+# Disable the log-rotation daemon during tests. TestClient invokes the FastAPI
+# lifespan, which would otherwise gzip the dev logs/ directory once per test
+# session as a silent side effect. The flag is honored by
+# core.log_rotation.start_rotation_daemon (returns None).
+os.environ.setdefault("AI_ORCHESTRATOR_DISABLE_LOG_ROTATION", "1")
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _prefect_test_harness():

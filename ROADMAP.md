@@ -166,7 +166,7 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       so `prefect.api_url` can move from LAN IP to tailnet — script staged at
       `root@192.168.2.13:/root/install_ts_lxc200.sh`
 
-### 1.4 DVC on TrueNAS — IN PROGRESS (branch `feat/dvc-truenas`)
+### 1.4 DVC on TrueNAS — DONE (v0.1.4-phase1.4, shipped 2026-05-06)
 - [x] `pip install dvc[ssh]` — pinned `dvc[ssh]>=3.67,<4` in `requirements.txt`
 - [x] `dvc init` + `.dvcignore` (excludes venv/, caches, vault/, secrets)
 - [x] Default remote: `ssh://dvc-orchestrator@192.168.2.222/mnt/f3/orchestrator-dvc`
@@ -229,12 +229,31 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
 29 new tests (auth: 17, contract: 11, external: 8 — minus 7 reused).
 Net suite size: 203 passed, 3 deselected (was 156 at end of Phase 1.5).
 
-### 1.8 Operational improvements
-- [ ] Single-flight lock on `_refresh_url_cache`
-- [ ] Audit subprocess calls for consistent timeout
-- [ ] Pydantic validation of `config.json` at startup
-- [ ] Log rotation in `LOG_DIR` (daily gzip, keep 90 days)
-- [ ] `prometheus_client` basic metrics
+### 1.8 Operational improvements — DONE (v0.1.8-phase1.8)
+- [x] Single-flight lock on `_refresh_url_cache` — `threading.Lock` +
+      double-checked locking in `llm/ollama.py`. N-thread contention
+      now fans down to one `/api/tags` roundtrip per TTL window.
+- [x] Audit subprocess calls for consistent timeout — all 14 production
+      callsites already pass `timeout=`; the audit found `TimeoutExpired`
+      handling gaps at three callsites, fixed atomically.
+- [x] Pydantic validation of `config.json` at startup — `core/config_schema.py`
+      `OrchestratorSettings` model. Import-time validation; failures fail-fast
+      with a `SystemExit` carrying the file path and the offending field.
+      All ~30 derived module-level constants in `core.config` keep their
+      names and semantics; `CONFIG` dict still importable.
+- [x] Log rotation in `LOG_DIR` — `core/log_rotation.py` `rotate_logs()`
+      pure function (gzip > 1d, delete `.log.gz` > 90d). Daemon thread
+      started in `app.py` lifespan (24-hour cadence, runs once at startup).
+      `orchestrator rotate-logs` CLI subcommand with `--dry-run`.
+- [x] `prometheus_client` basic metrics — four instruments at `/metrics`
+      (auth-bypassed, like `/health`): Counter `orchestrator_runs_total{status}`,
+      Histogram `orchestrator_agent_task_seconds{role,model}`, Counter
+      `orchestrator_llm_calls_total{role,model,outcome}`, Gauge
+      `orchestrator_active_runs`. No `run_id` label (cardinality discipline).
+
+43 net new tests (config: 16, url-lock: 5, subprocess-timeouts: 3,
+log-rotation: 10, metrics: 9). Suite: 203 → 246, ruff + mypy --strict
+clean on all touched files.
 
 ---
 

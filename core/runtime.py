@@ -160,6 +160,11 @@ def _init_run_status(run_id: str, **kwargs) -> None:
             "manifest_status": None,
             **kwargs,
         }
+    try:
+        from core.metrics import observe_run_started
+        observe_run_started()
+    except Exception:
+        pass
 
 
 # ── log writer ─────────────────────────────────────

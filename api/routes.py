@@ -25,7 +25,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 import llm.ollama as _llm_ollama
@@ -952,6 +952,13 @@ def get_health():
         "active_runs": len(active),
         "uptime_indicator": "ok"
     }
+
+
+@router.get("/metrics", include_in_schema=False)
+def get_metrics() -> Response:
+    """Prometheus metrics exposition (text/plain)."""
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # ------------------------------------------------
