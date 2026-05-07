@@ -132,7 +132,18 @@ def _drive_loop_with_messages(
     """
     fake_pubsub = MagicMock(name="FakePubSub")
     fake_pubsub.subscribe = MagicMock()
-    fake_pubsub.listen = MagicMock(return_value=iter(messages))
+    # Subscriber loop calls ``get_message(timeout=...)`` repeatedly
+    # until something raises. We feed each scripted message in turn,
+    # then raise to break out of the otherwise-infinite poll loop.
+    queue = list(messages) + [Exception("STOP")]
+
+    def _next_message(*_a: Any, **_k: Any) -> Any:
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    fake_pubsub.get_message.side_effect = _next_message
     fake_client.pubsub.return_value = fake_pubsub
 
     received: list[dict[str, Any]] = []

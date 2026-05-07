@@ -308,26 +308,35 @@ def _ws_subscriber_loop() -> None:
     except Exception as exc:
         _logger.warning("redis_ws_subscribe_failed error=%s", exc)
         return
-    try:
-        for raw in pubsub.listen():
-            if raw.get("type") != "message":
-                continue
-            data = raw.get("data")
-            if isinstance(data, bytes):
-                data = data.decode("utf-8", errors="replace")
-            try:
-                envelope = json.loads(data)
-            except (TypeError, ValueError):
-                continue
-            if not isinstance(envelope, dict):
-                continue
-            if envelope.get("origin") == _INSTANCE_ID:
-                continue  # don't re-deliver our own publish
-            inner = envelope.get("msg")
-            if isinstance(inner, dict):
-                _deliver_to_local_clients(inner)
-    except Exception as exc:  # pragma: no cover — only on connection death
-        _logger.warning("redis_ws_subscriber_died error=%s", exc)
+    # Poll-based loop instead of ``pubsub.listen()`` — the connection
+    # inherits the client's ``socket_timeout`` (5s by default), and a
+    # blocking listen() raises on every timeout window. ``get_message``
+    # with a bounded timeout returns ``None`` cleanly when there's
+    # nothing to read, letting the loop survive idle pub/sub forever.
+    while True:
+        try:
+            raw = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+        except Exception as exc:  # pragma: no cover — connection death
+            _logger.warning("redis_ws_subscriber_died error=%s", exc)
+            return
+        if raw is None:
+            continue
+        if raw.get("type") != "message":
+            continue
+        data = raw.get("data")
+        if isinstance(data, bytes):
+            data = data.decode("utf-8", errors="replace")
+        try:
+            envelope = json.loads(data)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(envelope, dict):
+            continue
+        if envelope.get("origin") == _INSTANCE_ID:
+            continue  # don't re-deliver our own publish
+        inner = envelope.get("msg")
+        if isinstance(inner, dict):
+            _deliver_to_local_clients(inner)
 
 
 # ── run status helpers ─────────────────────────────
