@@ -76,6 +76,11 @@ def on_completion(flow: Any, flow_run: Any, state: Any) -> None:
         run_id = _extract_run_id(flow_run)
         if run_id:
             _update_run_status(run_id, phase=state.name, completed=True)
+            try:
+                from core.metrics import observe_run_succeeded
+                observe_run_succeeded()
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("on_completion hook error: %s", e)
 
@@ -87,6 +92,15 @@ def on_failure(flow: Any, flow_run: Any, state: Any) -> None:
             err = getattr(state, "message", None) or "Failed"
             _update_run_status(run_id, phase=state.name,
                                completed=True, error=err)
+            try:
+                from core.metrics import observe_run_failed, observe_run_timed_out
+                state_name: str = getattr(state, "name", "") or ""
+                if state_name.lower() == "timedout":
+                    observe_run_timed_out()
+                else:
+                    observe_run_failed()
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("on_failure hook error: %s", e)
 
@@ -97,6 +111,11 @@ def on_cancelled(flow: Any, flow_run: Any, state: Any) -> None:
         if run_id:
             _update_run_status(run_id, phase=state.name,
                                completed=True, error="Cancelled")
+            try:
+                from core.metrics import observe_run_aborted
+                observe_run_aborted()
+            except Exception:
+                pass
 
         # Campaign flows: emit evidence so cancelled campaigns still bundle.
         if getattr(flow, "name", "") == "campaign":
@@ -202,5 +221,11 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             response_text=response_text,
             started_at=started_at,
         ))
+        try:
+            from core.metrics import observe_agent_task, observe_llm_call
+            observe_agent_task(agent_role, model, duration_ms / 1000.0)
+            observe_llm_call(agent_role, model, success=response_tokens > 0)
+        except Exception:
+            pass
     except Exception as e:
         logger.warning("on_task_completion hook error: %s", e)

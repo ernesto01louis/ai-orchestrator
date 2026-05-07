@@ -65,6 +65,7 @@ from core.runtime import (
     _load_run_index, _persist_run_index,
 )
 from core.auth import BearerTokenAuthMiddleware, load_token_from_env
+import core.metrics  # noqa: F401 — registers Prometheus instruments at import time
 
 from agents.loader import load_agent, load_all_agents, reload_all as reload_agents, list_roles as list_agent_roles
 from dream import run_dream, DREAM_LOG, _load_json as dream_load_json

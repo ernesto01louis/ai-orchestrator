@@ -26,6 +26,7 @@ ENV_VAR = "ORCHESTRATOR_API_TOKEN"
 DEFAULT_PUBLIC_PATHS: frozenset[str] = frozenset(
     {
         "/health",
+        "/metrics",
         "/openapi.json",
         "/docs",
         "/redoc",
