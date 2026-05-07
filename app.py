@@ -125,6 +125,17 @@ async def _lifespan(app_instance):
             await asyncio.to_thread(reconcile_all)
     except Exception as e:
         print(f"WARNING: Postgres reconcile-on-startup failed: {e}")
+
+    # Phase 2.2 hydrate-on-startup: repopulate RUN_STATUS from Redis
+    # so in-flight runs survive an orchestrator restart. No-op when
+    # redis.enabled=false. Runs in a thread to keep the event loop free.
+    try:
+        from core.runtime import hydrate_run_status_from_redis  # noqa: PLC0415
+        hydrated = await asyncio.to_thread(hydrate_run_status_from_redis)
+        if hydrated:
+            print(f"runtime: hydrated {hydrated} RUN_STATUS entries from Redis")
+    except Exception as e:
+        print(f"WARNING: Redis RUN_STATUS hydrate failed at startup: {e}")
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield

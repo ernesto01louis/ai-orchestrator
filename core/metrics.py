@@ -122,3 +122,27 @@ def observe_postgres_reconcile_rows(table: str, rows: int) -> None:
 
 def observe_postgres_reconcile_duration(seconds: float) -> None:
     POSTGRES_RECONCILE_DURATION_SECONDS.observe(max(seconds, 0.0))
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.2 Redis mirror metrics
+# ---------------------------------------------------------------------------
+# Visibility for the Redis write-through path. Cardinality is bounded:
+# ``operation`` is one of the small handful of write paths (today:
+# {run_status_init, run_status_update, run_status_hydrate}); ``outcome``
+# is {"success", "failure"}. No ``run_id`` label — Grafana correlates
+# by run_id via logs, not metrics labels (mirrors the Postgres-side
+# discipline).
+
+REDIS_RUN_STATUS_WRITES_TOTAL = Counter(
+    "orchestrator_redis_run_status_writes_total",
+    "Redis RUN_STATUS mirror operations by outcome.",
+    ["operation", "outcome"],
+)
+
+
+def observe_redis_run_status_write(operation: str, *, success: bool) -> None:
+    REDIS_RUN_STATUS_WRITES_TOTAL.labels(
+        operation=operation or "unknown",
+        outcome="success" if success else "failure",
+    ).inc()

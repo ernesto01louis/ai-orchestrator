@@ -11,17 +11,28 @@ thread can call into here safely:
   * `log` writes via flock on the per-run log file.
 
 The main loop is captured by `_lifespan` at startup via `set_main_loop`.
+
+Phase 2.2: when ``redis.enabled=true``, every ``_init_run_status`` /
+``_update_run_status`` write is mirrored to Redis (best-effort, never
+raises). At startup, ``hydrate_run_status_from_redis()`` repopulates
+the in-process dict from Redis so in-flight runs survive an
+orchestrator restart. The in-process dict remains the hot-path read
+source — Redis is a write-through mirror, not the canonical store.
 """
 from __future__ import annotations
 
 import asyncio
 import fcntl
 import json
+import logging
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 from .paths import LOG_DIR, RUN_INDEX_FILE
+
+_logger = logging.getLogger(__name__)
 
 # ── live process state ─────────────────────────────
 RUN_STATUS: dict = {}
@@ -40,6 +51,117 @@ _campaign_status_lock = threading.Lock()
 _ws_clients: list = []
 _ws_lock = threading.Lock()
 _MAIN_LOOP: asyncio.AbstractEventLoop | None = None
+
+# Redis hash key prefix for the RUN_STATUS mirror. Keys look like
+# ``run_status:<run_id>``; values are HSETs with one field per RUN_STATUS
+# entry, JSON-encoded so mixed types round-trip.
+_REDIS_RUN_STATUS_PREFIX = "run_status:"
+
+
+def _redis_run_status_key(run_id: str) -> str:
+    return f"{_REDIS_RUN_STATUS_PREFIX}{run_id}"
+
+
+def _mirror_run_status_to_redis(
+    run_id: str, snapshot: dict[str, Any], *, operation: str
+) -> None:
+    """Best-effort write of a RUN_STATUS snapshot to Redis. Never raises.
+
+    No-op when Redis is disabled. On failure, logs a structured WARN and
+    bumps the Prometheus counter; in-process state stays canonical.
+    ``operation`` is one of ``"init"`` / ``"update"`` and tags the metric.
+    """
+    # Lazy imports — avoid pulling redis-py / prometheus_client into
+    # core.runtime at module-load time. Both modules are intentionally
+    # late-bound so a missing dependency never blocks orchestrator boot.
+    try:
+        from core import redis_client  # noqa: PLC0415
+    except ImportError:
+        return
+    if not redis_client.is_enabled():
+        return
+    try:
+        client = redis_client.get_client()
+        encoded = {k: json.dumps(v, default=str) for k, v in snapshot.items()}
+        key = _redis_run_status_key(run_id)
+        # HSET + EXPIRE in a pipeline so the TTL doesn't lag a slow
+        # round-trip. The pipeline is implicit MULTI/EXEC under the hood.
+        from core import config as _config  # noqa: PLC0415
+        with client.pipeline(transaction=False) as pipe:
+            pipe.hset(key, mapping=encoded)
+            pipe.expire(key, _config.REDIS_RUN_STATUS_TTL)
+            pipe.execute()
+        _observe_redis_run_status(operation, success=True)
+    except Exception as exc:
+        _logger.warning(
+            "redis_run_status_mirror_failed run_id=%s operation=%s error=%s",
+            run_id, operation, exc,
+        )
+        _observe_redis_run_status(operation, success=False)
+
+
+def _observe_redis_run_status(operation: str, *, success: bool) -> None:
+    try:
+        from core.metrics import observe_redis_run_status_write  # noqa: PLC0415
+        observe_redis_run_status_write(operation, success=success)
+    except Exception:
+        pass
+
+
+def hydrate_run_status_from_redis() -> int:
+    """Repopulate ``RUN_STATUS`` from Redis at startup. Returns the
+    count of runs hydrated.
+
+    No-op when Redis is disabled or unreachable. Existing in-process
+    entries (which shouldn't exist at startup but may in tests) are
+    overwritten. Called from ``app.py:_lifespan``; the orchestrator
+    boots even if hydration fails.
+    """
+    try:
+        from core import redis_client  # noqa: PLC0415
+    except ImportError:
+        return 0
+    if not redis_client.is_enabled():
+        return 0
+    try:
+        client = redis_client.get_client()
+        keys: list[str] = list(
+            client.scan_iter(match=f"{_REDIS_RUN_STATUS_PREFIX}*", count=200)
+        )
+    except Exception as exc:
+        _logger.warning("redis_run_status_hydrate_scan_failed error=%s", exc)
+        _observe_redis_run_status("hydrate", success=False)
+        return 0
+
+    count = 0
+    with _run_status_lock:
+        for key in keys:
+            try:
+                # cast() narrows redis-py's ``ResponseT = Awaitable[T] | T``
+                # return-type union to the sync branch; the runtime client
+                # is always sync (constructed in core.redis_client).
+                raw = cast("dict[str, str]", client.hgetall(key) or {})
+            except Exception as exc:
+                _logger.warning(
+                    "redis_run_status_hydrate_hgetall_failed key=%s error=%s",
+                    key, exc,
+                )
+                continue
+            if not raw:
+                continue
+            run_id = key[len(_REDIS_RUN_STATUS_PREFIX):]
+            decoded: dict[str, Any] = {}
+            for k, v in raw.items():
+                try:
+                    decoded[k] = json.loads(v)
+                except (TypeError, ValueError):
+                    decoded[k] = v
+            RUN_STATUS[run_id] = decoded
+            count += 1
+    _observe_redis_run_status("hydrate", success=True)
+    if count:
+        _logger.info("redis_run_status_hydrated count=%s", count)
+    return count
 
 
 def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -136,6 +258,8 @@ def _update_run_status(run_id: str, **kwargs) -> None:
             }
         RUN_STATUS[run_id].update(kwargs)
         snapshot = dict(RUN_STATUS[run_id])
+    # Phase 2.2: mirror to Redis (best-effort; no-op when disabled).
+    _mirror_run_status_to_redis(run_id, snapshot, operation="update")
     if any(k in kwargs for k in ("phase", "score", "completed", "error")):
         _ws_broadcast({
             "type": "status", "run_id": run_id,
@@ -174,6 +298,9 @@ def _init_run_status(run_id: str, **kwargs) -> None:
             "manifest_status": None,
             **kwargs,
         }
+        snapshot = dict(RUN_STATUS[run_id])
+    # Phase 2.2: mirror to Redis (best-effort; no-op when disabled).
+    _mirror_run_status_to_redis(run_id, snapshot, operation="init")
     try:
         from core.metrics import observe_run_started
         observe_run_started()
