@@ -12,10 +12,16 @@ Transport: Streamable HTTP (mounted as ASGI sub-app)
 """
 
 import json
-import uuid
 import threading
+import uuid
 
 from mcp.server.fastmcp import FastMCP
+
+# Phase 1.7 — MCP contract version. Bump MAJOR on breaking changes
+# (tool/resource/prompt rename or removed; arg-shape break). Bump MINOR on
+# additive changes (new tool/resource, new optional arg). Bump PATCH on
+# doc/description-only edits.
+MCP_CONTRACT_VERSION = "1.0.0"
 
 
 # Create MCP server instance
@@ -204,6 +210,7 @@ def update_agent_prompt(role: str, prompt_type: str, content: str) -> dict:
         content: New prompt template content (supports {{variable}} placeholders)
     """
     import os
+
     from agents.loader import load_agent
 
     valid_types = {"system_prompt", "user_prompt", "user_prompt_multi"}
@@ -321,6 +328,51 @@ def resource_dream_log() -> str:
     """History of dream consolidation cycles with health scores."""
     from dream import DREAM_LOG, _load_json
     return json.dumps(_load_json(DREAM_LOG, []), indent=2)
+
+
+@mcp.resource("orchestrator://contract")
+def resource_contract() -> str:
+    """Machine-readable MCP contract: version + enumerated tools, resources,
+    templates, and prompts. Drift-free — introspects FastMCP at call time."""
+    tools = [
+        {"name": t.name, "description": t.description}
+        for t in mcp._tool_manager.list_tools()
+    ]
+    resources = [
+        {"uri": str(r.uri), "name": r.name, "description": r.description}
+        for r in mcp._resource_manager.list_resources()
+    ]
+    templates = [
+        {
+            "uri_template": t.uri_template,
+            "name": t.name,
+            "description": t.description,
+        }
+        for t in mcp._resource_manager.list_templates()
+    ]
+    prompts = [
+        {
+            "name": p.name,
+            "description": p.description,
+            "arguments": [
+                {"name": a.name, "required": a.required}
+                for a in (p.arguments or [])
+            ],
+        }
+        for p in mcp._prompt_manager.list_prompts()
+    ]
+    return json.dumps(
+        {
+            "version": MCP_CONTRACT_VERSION,
+            "name": "AI Orchestrator",
+            "tools": tools,
+            "resources": resources,
+            "templates": templates,
+            "prompts": prompts,
+        },
+        indent=2,
+        sort_keys=False,
+    )
 
 
 # ------------------------------------------------
