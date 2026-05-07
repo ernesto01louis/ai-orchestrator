@@ -136,6 +136,15 @@ async def _lifespan(app_instance):
             print(f"runtime: hydrated {hydrated} RUN_STATUS entries from Redis")
     except Exception as e:
         print(f"WARNING: Redis RUN_STATUS hydrate failed at startup: {e}")
+
+    # Phase 2.2.3 ws-pubsub: start the daemon thread that subscribes
+    # to the cross-instance broadcast channel. No-op when Redis is
+    # disabled. Idempotent so reload/uvicorn-reload doesn't double up.
+    try:
+        from core.runtime import start_ws_broadcast_subscriber  # noqa: PLC0415
+        start_ws_broadcast_subscriber()
+    except Exception as e:
+        print(f"WARNING: Redis ws-broadcast subscriber failed to start: {e}")
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield

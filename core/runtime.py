@@ -25,6 +25,8 @@ import asyncio
 import fcntl
 import json
 import logging
+import os
+import secrets
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +58,24 @@ _MAIN_LOOP: asyncio.AbstractEventLoop | None = None
 # ``run_status:<run_id>``; values are HSETs with one field per RUN_STATUS
 # entry, JSON-encoded so mixed types round-trip.
 _REDIS_RUN_STATUS_PREFIX = "run_status:"
+
+# Phase 2.2.3 — pub/sub channel for cross-instance WebSocket fan-out.
+# When ``redis.enabled=true``, every ``_ws_broadcast`` call publishes
+# here; the subscriber thread on each orchestrator instance consumes
+# from the channel and re-delivers to its local _ws_clients. The
+# ``origin`` field on each envelope keeps an instance from re-delivering
+# its own publish (avoids the self-loop).
+_WS_BROADCAST_CHANNEL = "ws_broadcast"
+
+# Per-process unique ID. ``ORCHESTRATOR_INSTANCE_ID`` env override is
+# accepted so operators can pin known IDs in multi-instance setups; the
+# random fallback covers single-instance dev.
+_INSTANCE_ID = os.environ.get("ORCHESTRATOR_INSTANCE_ID") or secrets.token_hex(8)
+
+# Subscriber thread handle (started by ``start_ws_broadcast_subscriber``,
+# called from app.py:_lifespan once Redis is confirmed enabled).
+_ws_subscriber_thread: threading.Thread | None = None
+_ws_subscriber_lock = threading.Lock()
 
 
 def _redis_run_status_key(run_id: str) -> str:
@@ -179,6 +199,21 @@ def _ws_broadcast(msg: dict) -> None:
     Safe to call from any thread: the actual `ws.send_text` coroutine is
     scheduled on the captured main loop via asyncio.run_coroutine_threadsafe.
     Each send is bounded by a 2 s timeout; clients that error are evicted.
+
+    Phase 2.2.3: when Redis is enabled, the message is also published
+    on ``_WS_BROADCAST_CHANNEL`` so other orchestrator instances can
+    fan it out to their local clients. Local delivery happens
+    unconditionally — Redis is purely additive.
+    """
+    _deliver_to_local_clients(msg)
+    _publish_ws_broadcast_to_redis(msg)
+
+
+def _deliver_to_local_clients(msg: dict[str, Any]) -> None:
+    """Deliver a broadcast message to clients connected to THIS process.
+
+    Extracted so the Redis subscriber thread can re-use the same
+    delivery semantics for messages originated on other instances.
     """
     if _MAIN_LOOP is None:
         # startup hasn't completed; no clients are subscribed yet anyway
@@ -202,6 +237,97 @@ def _ws_broadcast(msg: dict) -> None:
                     _ws_clients.remove(ws)
                 except ValueError:
                     pass
+
+
+def _publish_ws_broadcast_to_redis(msg: dict[str, Any]) -> None:
+    """Publish a broadcast envelope to the Redis fan-out channel.
+
+    Best-effort; never raises. No-op when Redis is disabled. The
+    envelope carries an ``origin`` field so the subscriber on this
+    instance can ignore its own publishes (avoiding double-delivery).
+    """
+    try:
+        from core import redis_client  # noqa: PLC0415
+    except ImportError:
+        return
+    if not redis_client.is_enabled():
+        return
+    try:
+        envelope = {"origin": _INSTANCE_ID, "msg": msg}
+        client = redis_client.get_client()
+        client.publish(_WS_BROADCAST_CHANNEL, json.dumps(envelope))
+    except Exception as exc:
+        _logger.warning("redis_ws_publish_failed error=%s", exc)
+
+
+def start_ws_broadcast_subscriber() -> None:
+    """Start the daemon thread that subscribes to the WS broadcast channel.
+
+    No-op when Redis is disabled or the thread is already running.
+    Idempotent — safe to call from ``_lifespan`` even on hot-reload.
+
+    The thread filters out envelopes originated by this instance
+    (matching ``_INSTANCE_ID``) so a single-process setup doesn't
+    deliver each message twice.
+    """
+    try:
+        from core import redis_client  # noqa: PLC0415
+    except ImportError:
+        return
+    if not redis_client.is_enabled():
+        return
+
+    global _ws_subscriber_thread
+    with _ws_subscriber_lock:
+        if _ws_subscriber_thread is not None and _ws_subscriber_thread.is_alive():
+            return
+        thread = threading.Thread(
+            target=_ws_subscriber_loop,
+            name="redis-ws-subscriber",
+            daemon=True,
+        )
+        _ws_subscriber_thread = thread
+        thread.start()
+
+
+def _ws_subscriber_loop() -> None:
+    """Long-running pub/sub consumer. Logs and exits on fatal Redis error.
+
+    Daemon thread — Python lets it terminate on process shutdown.
+    """
+    try:
+        from core import redis_client  # noqa: PLC0415
+    except ImportError:
+        return
+    try:
+        client = redis_client.get_client()
+        # redis-py's PubSub factory is untyped — its constructor takes
+        # dynamic kwargs that mypy can't see through, so we suppress.
+        pubsub = client.pubsub()  # type: ignore[no-untyped-call]
+        pubsub.subscribe(_WS_BROADCAST_CHANNEL)
+    except Exception as exc:
+        _logger.warning("redis_ws_subscribe_failed error=%s", exc)
+        return
+    try:
+        for raw in pubsub.listen():
+            if raw.get("type") != "message":
+                continue
+            data = raw.get("data")
+            if isinstance(data, bytes):
+                data = data.decode("utf-8", errors="replace")
+            try:
+                envelope = json.loads(data)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(envelope, dict):
+                continue
+            if envelope.get("origin") == _INSTANCE_ID:
+                continue  # don't re-deliver our own publish
+            inner = envelope.get("msg")
+            if isinstance(inner, dict):
+                _deliver_to_local_clients(inner)
+    except Exception as exc:  # pragma: no cover — only on connection death
+        _logger.warning("redis_ws_subscriber_died error=%s", exc)
 
 
 # ── run status helpers ─────────────────────────────
