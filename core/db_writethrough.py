@@ -179,7 +179,64 @@ def mirror_campaigns(
         )
 
 
+def _llm_call_record_to_row(record: Any) -> dict[str, Any]:
+    """Convert an LlmCallRecord (dataclass from core.llm_call_log) into
+    insert_llm_call input. Field names rename from Pydantic to ORM:
+    ``model`` → ``model_name``, ``server_url`` → ``host``.
+    """
+    return {
+        "call_id": getattr(record, "call_id", "") or "",
+        "run_id": record.run_id,
+        "agent_role": getattr(record, "agent_role", "") or "",
+        "model_name": record.model,
+        "model_digest": getattr(record, "model_digest", "") or None,
+        "model_size_bytes": int(getattr(record, "model_size_bytes", 0) or 0),
+        "host": getattr(record, "server_url", "") or "",
+        "started_at": getattr(record, "started_at", None),
+        "duration_ms": int(getattr(record, "duration_ms", 0) or 0),
+        "response_tokens": int(getattr(record, "response_tokens", 0) or 0),
+        "sampling": getattr(record, "sampling", {}) or {},
+        "rendered_messages": getattr(record, "rendered_messages", []) or [],
+        "response_text": getattr(record, "response_text", "") or "",
+    }
+
+
+def mirror_llm_call(record: Any) -> None:
+    """Eagerly mirror one LlmCallRecord into the llm_calls table.
+
+    Called from ``prefect_io.state_hooks.on_task_completion`` immediately
+    after the record is appended to ``LLM_CALL_LOG``. Eager (per-call)
+    insert, not drain-and-bulk at bundle build, so Phase 2.4 budget
+    dashboards see live mid-campaign cost.
+
+    Skips silently when ``call_id`` is empty — legacy code paths that
+    don't pass a Prefect task-run ID would all collide on the empty PK
+    and get dropped by ON CONFLICT DO NOTHING anyway. The JSON path
+    (LLM_CALL_LOG → evidence bundle) still captures the call.
+    """
+    if not db.is_enabled():
+        return
+    if not getattr(record, "call_id", ""):
+        # Empty call_id — skip Postgres mirror (see docstring).
+        return
+    try:
+        row = _llm_call_record_to_row(record)
+        with db.get_session() as session:
+            db_models.insert_llm_call(session, row)
+    except Exception as exc:
+        log.warning(
+            "postgres_writethrough_failed",
+            extra={
+                "table": "llm_calls",
+                "call_id": getattr(record, "call_id", ""),
+                "run_id": getattr(record, "run_id", ""),
+                "error": repr(exc),
+            },
+        )
+
+
 __all__ = [
     "mirror_campaigns",
+    "mirror_llm_call",
     "mirror_run_completion",
 ]

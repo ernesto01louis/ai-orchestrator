@@ -287,3 +287,99 @@ def test_mirror_campaigns_empty_changed_ids_skips_session(
     monkeypatch.setattr(db, "get_session", spy)
     db_writethrough.mirror_campaigns({}, changed_ids=set())
     spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# mirror_llm_call (2.1.8)
+# ---------------------------------------------------------------------------
+
+def _make_llm_record(**overrides: Any) -> Any:
+    """Construct a real LlmCallRecord via the dataclass constructor.
+
+    Importing here so the test module doesn't import core.llm_call_log
+    at collection time.
+    """
+    from core.llm_call_log import LlmCallRecord
+    defaults = {
+        "run_id": "run-1",
+        "model": "qwen2.5:72b",
+        "rendered_messages": [{"role": "user", "content": "hi"}],
+        "sampling": {"temperature": 0.0},
+        "response_tokens": 42,
+        "duration_ms": 1234,
+        "call_id": "task-uuid-1",
+        "agent_role": "generator",
+        "server_url": "http://192.168.2.10:11434",
+        "model_digest": "sha256:abc",
+        "model_size_bytes": 1234567890,
+        "response_text": "hello",
+    }
+    defaults.update(overrides)
+    return LlmCallRecord(**defaults)
+
+
+def test_llm_call_record_to_row_renames_fields() -> None:
+    record = _make_llm_record()
+    row = db_writethrough._llm_call_record_to_row(record)
+    # Field renames: model → model_name, server_url → host
+    assert row["model_name"] == "qwen2.5:72b"
+    assert row["host"] == "http://192.168.2.10:11434"
+    # Rest of the columns
+    assert row["call_id"] == "task-uuid-1"
+    assert row["run_id"] == "run-1"
+    assert row["agent_role"] == "generator"
+    assert row["duration_ms"] == 1234
+    assert row["response_tokens"] == 42
+    assert row["sampling"] == {"temperature": 0.0}
+    assert row["response_text"] == "hello"
+    assert row["model_size_bytes"] == 1234567890
+
+
+def test_mirror_llm_call_no_op_when_disabled(
+    disabled_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spy = MagicMock(side_effect=AssertionError("get_session called when disabled"))
+    monkeypatch.setattr(db, "get_session", spy)
+    db_writethrough.mirror_llm_call(_make_llm_record())
+    spy.assert_not_called()
+
+
+def test_mirror_llm_call_skips_record_with_empty_call_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty call_id would collide on the PK and get DO NOTHING'd —
+    skip the postgres write entirely."""
+    monkeypatch.setattr(db, "is_enabled", lambda: True)
+    spy = MagicMock(side_effect=AssertionError("get_session called with empty call_id"))
+    monkeypatch.setattr(db, "get_session", spy)
+    db_writethrough.mirror_llm_call(_make_llm_record(call_id=""))
+    spy.assert_not_called()
+
+
+def test_mirror_llm_call_calls_insert_llm_call(
+    enabled_db_capturing_session: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spy = MagicMock()
+    monkeypatch.setattr("core.db_models.insert_llm_call", spy)
+    db_writethrough.mirror_llm_call(_make_llm_record())
+    spy.assert_called_once()
+    session_arg, row = spy.call_args.args
+    assert session_arg is enabled_db_capturing_session["session"]
+    assert row["call_id"] == "task-uuid-1"
+    assert row["model_name"] == "qwen2.5:72b"
+
+
+def test_mirror_llm_call_swallows_db_exception(
+    enabled_db_capturing_session: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        "core.db_models.insert_llm_call",
+        MagicMock(side_effect=RuntimeError("postgres unreachable")),
+    )
+    db_writethrough.mirror_llm_call(_make_llm_record())
+    assert any(
+        "postgres_writethrough_failed" in r.message for r in caplog.records
+    )
