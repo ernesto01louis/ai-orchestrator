@@ -64,6 +64,7 @@ from core.runtime import (
     _update_run_status, _init_run_status,
     _load_run_index, _persist_run_index,
 )
+from core.auth import BearerTokenAuthMiddleware, load_token_from_env
 
 from agents.loader import load_agent, load_all_agents, reload_all as reload_agents, list_roles as list_agent_roles
 from dream import run_dream, DREAM_LOG, _load_json as dream_load_json
@@ -83,6 +84,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Bearer-token auth (Phase 1.7). No-op when ORCHESTRATOR_API_TOKEN is unset.
+app.add_middleware(BearerTokenAuthMiddleware, token=load_token_from_env())
 
 # MCP server: mount with proper lifecycle management
 from mcp_server import mcp as mcp_instance
