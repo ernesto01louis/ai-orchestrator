@@ -363,6 +363,56 @@ def test_core_config_exposes_otel_constants() -> None:
     assert isinstance(cfg.OTEL_SAMPLE_RATIO, float)
 
 
+def test_missing_optional_budget_block_uses_defaults() -> None:
+    """Phase 2.4: omitting 'budget' must yield enabled=False (dormant)."""
+    raw = _load_example()
+    raw.pop("budget", None)
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.budget.enabled is False
+    assert "default" in settings.budget.rates_per_million_tokens
+    assert settings.budget.thresholds_pct == [50, 80, 100]
+
+
+def test_budget_block_in_example_parses_to_disabled() -> None:
+    """The 'budget' block in config.example.json must default to disabled."""
+    raw = _load_example()
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.budget.enabled is False
+    default_rate = settings.budget.rates_per_million_tokens["default"]
+    assert default_rate.prompt == 0.0
+    assert default_rate.completion == 0.0
+
+
+def test_budget_enabled_with_paid_model_parses() -> None:
+    """A configured budget block with paid rates parses end-to-end."""
+    raw = _load_example()
+    raw["budget"] = {
+        "enabled": True,
+        "rates_per_million_tokens": {
+            "default": {"prompt": 0.0, "completion": 0.0},
+            "claude-opus-4-7": {"prompt": 15.0, "completion": 75.0},
+        },
+        "thresholds_pct": [50, 90, 100],
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.budget.enabled is True
+    paid = settings.budget.rates_per_million_tokens["claude-opus-4-7"]
+    assert paid.prompt == 15.0
+    assert paid.completion == 75.0
+    assert settings.budget.thresholds_pct == [50, 90, 100]
+
+
+def test_core_config_exposes_budget_constants() -> None:
+    """core.config must export the BUDGET_* derived constants."""
+    import core.config as cfg  # noqa: PLC0415
+
+    assert hasattr(cfg, "BUDGET_ENABLED")
+    assert hasattr(cfg, "BUDGET_RATES")
+    assert hasattr(cfg, "BUDGET_THRESHOLDS_PCT")
+    assert isinstance(cfg.BUDGET_RATES, dict)
+    assert isinstance(cfg.BUDGET_THRESHOLDS_PCT, list)
+
+
 def test_core_config_otel_endpoint_env_overrides_config() -> None:
     """OTEL_ENDPOINT env var must win over the config.json value.
 

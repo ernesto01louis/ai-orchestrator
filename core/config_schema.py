@@ -171,6 +171,36 @@ class PostgresConfig(_FlexModel):
     reconcile_on_startup: bool = True
 
 
+class BudgetRate(_FlexModel):
+    """Per-model cost rate. Both numbers are USD per 1M tokens.
+
+    Local Ollama models default to ``0.0`` (electricity is below the
+    measurement threshold). Operators flip to non-zero rates when their
+    consumer projects route through a paid provider.
+    """
+
+    prompt: float = 0.0
+    completion: float = 0.0
+
+
+class BudgetConfig(_FlexModel):
+    """Phase 2.4 budget tracking.
+
+    Rates are keyed by model name. The ``default`` entry is the
+    fallback for any model not in the map. Phase 2.5 SkyPilot will add
+    a separate ``cloud_gpu_per_hour`` block.
+    """
+
+    enabled: bool = False
+    rates_per_million_tokens: dict[str, BudgetRate] = {
+        "default": BudgetRate(prompt=0.0, completion=0.0),
+    }
+    # Threshold percentages that trigger a notification (sorted ascending).
+    # 100 ALSO triggers an auto-pause on the campaign. Operators can drop
+    # ``100`` here to disable auto-pause without losing the warning.
+    thresholds_pct: list[int] = [50, 80, 100]
+
+
 class OTelConfig(_FlexModel):
     """Phase 2.3 OpenTelemetry tracing configuration.
 
@@ -249,3 +279,4 @@ class OrchestratorSettings(_FlexModel):
     postgres: PostgresConfig = PostgresConfig()
     redis: RedisConfig = RedisConfig()
     otel: OTelConfig = OTelConfig()
+    budget: BudgetConfig = BudgetConfig()
