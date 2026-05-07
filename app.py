@@ -103,6 +103,11 @@ async def _lifespan(app_instance):
     # Capture the running event loop so background threads can post coroutines
     # back via asyncio.run_coroutine_threadsafe (used by _ws_broadcast).
     set_main_loop(asyncio.get_running_loop())
+
+    # Start log-rotation daemon (gzip >1d, delete >90d, 24-hour cadence)
+    from core.log_rotation import start_rotation_daemon  # noqa: PLC0415
+    start_rotation_daemon(LOG_DIR)
+
     try:
         if not _healthcheck():
             print("WARNING: Prefect server unreachable at startup; new runs will use daemon-thread fallback until it returns")
