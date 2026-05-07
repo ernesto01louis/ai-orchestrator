@@ -206,7 +206,7 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
         if not agent_role:
             agent_role = str(envelope.get("_orchestrator_agent_role", "") or "")
 
-        LLM_CALL_LOG.append(LlmCallRecord(
+        record = LlmCallRecord(
             run_id=run_id,
             model=model,
             rendered_messages=rendered if isinstance(rendered, list) else [],
@@ -220,7 +220,16 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             model_size_bytes=model_size_bytes,
             response_text=response_text,
             started_at=started_at,
-        ))
+        )
+        LLM_CALL_LOG.append(record)
+        # Phase 2.1: eager dual-write to the llm_calls table. Failure is
+        # logged + swallowed inside mirror_llm_call (JSON drain-into-bundle
+        # remains canonical).
+        try:
+            from core import db_writethrough
+            db_writethrough.mirror_llm_call(record)
+        except Exception:
+            pass
         try:
             from core.metrics import observe_agent_task, observe_llm_call
             observe_agent_task(agent_role, model, duration_ms / 1000.0)

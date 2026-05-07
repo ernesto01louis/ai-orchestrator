@@ -145,6 +145,105 @@ def test_missing_optional_dream_block_uses_defaults() -> None:
     assert settings.dream.auto_interval == 10
 
 
+def test_missing_optional_postgres_block_uses_defaults() -> None:
+    """Phase 2.1: omitting 'postgres' must yield enabled=False (dormant)."""
+    raw = _load_example()
+    raw.pop("postgres", None)
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.postgres.enabled is False
+    assert settings.postgres.dsn == ""
+    assert settings.postgres.pool_size == 5
+    assert settings.postgres.pool_max_overflow == 5
+    assert settings.postgres.statement_timeout_ms == 5000
+    assert settings.postgres.reconcile_on_startup is True
+
+
+def test_postgres_block_in_example_parses_to_disabled() -> None:
+    """The 'postgres' block in config.example.json must default to disabled."""
+    raw = _load_example()
+    settings = OrchestratorSettings.model_validate(raw)
+    # Whether or not the example ships the block, defaults must keep it dormant
+    assert settings.postgres.enabled is False
+    assert settings.postgres.dsn == ""
+
+
+def test_postgres_enabled_with_dsn_parses() -> None:
+    """A configured postgres block with enabled=true and a real DSN parses."""
+    raw = _load_example()
+    raw["postgres"] = {
+        "enabled": True,
+        "dsn": "postgresql://orchestrator:secret@192.168.2.183:5432/orchestrator",
+        "pool_size": 8,
+        "statement_timeout_ms": 3000,
+        "reconcile_on_startup": False,
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.postgres.enabled is True
+    assert settings.postgres.dsn.startswith("postgresql://")
+    assert "orchestrator" in settings.postgres.dsn
+    assert settings.postgres.pool_size == 8
+    assert settings.postgres.statement_timeout_ms == 3000
+    assert settings.postgres.reconcile_on_startup is False
+
+
+def test_postgres_wrong_type_pool_size_raises() -> None:
+    """postgres.pool_size must be an int; passing a string raises ValidationError."""
+    raw = _load_example()
+    raw["postgres"] = {"enabled": True, "pool_size": "many"}
+    with pytest.raises(ValidationError) as exc_info:
+        OrchestratorSettings.model_validate(raw)
+    assert "pool_size" in str(exc_info.value)
+
+
+def test_postgres_unknown_keys_tolerated() -> None:
+    """_*_note keys inside the postgres block must be tolerated (extra='allow')."""
+    raw = _load_example()
+    raw["postgres"] = {
+        "_dsn_note": "Set POSTGRES_DSN in .env",
+        "enabled": False,
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.postgres.enabled is False
+
+
+def test_core_config_exposes_postgres_constants() -> None:
+    """core.config must export the POSTGRES_* derived constants."""
+    import core.config as cfg  # noqa: PLC0415
+
+    assert hasattr(cfg, "POSTGRES_ENABLED")
+    assert hasattr(cfg, "POSTGRES_DSN")
+    assert hasattr(cfg, "POSTGRES_POOL_SIZE")
+    assert hasattr(cfg, "POSTGRES_POOL_MAX_OVERFLOW")
+    assert hasattr(cfg, "POSTGRES_STATEMENT_TIMEOUT_MS")
+    assert hasattr(cfg, "POSTGRES_RECONCILE_ON_STARTUP")
+    # Defaults from config.example.json keep the feature dormant
+    assert cfg.POSTGRES_ENABLED is False
+    assert isinstance(cfg.POSTGRES_POOL_SIZE, int)
+
+
+def test_core_config_postgres_dsn_env_overrides_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POSTGRES_DSN env var must win over the config.json value (mirrors GOTIFY_TOKEN).
+
+    Runs in a subprocess to avoid contaminating the current core.config import.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "import os, sys; sys.path.insert(0, '.'); "
+        "os.environ['POSTGRES_DSN'] = 'postgresql://env-wins/db'; "
+        "import core.config as cfg; "
+        "print(cfg.POSTGRES_DSN)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    assert b"postgresql://env-wins/db" in result.stdout
+
+
 def test_error_message_identifies_field_path() -> None:
     """ValidationError on a nested required field must name the field path clearly."""
     bad_cfg = {

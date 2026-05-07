@@ -108,12 +108,33 @@ def build_bundle(
     campaign = Campaign.model_validate(raw)
     crate_dir = CAMPAIGNS_OUTPUT_DIR / campaign_id
 
+    key = signing_key or SigningKey.load()
     builder = _BundleBuilder(
         campaign=campaign,
         crate_dir=crate_dir,
-        signing_key=signing_key or SigningKey.load(),
+        signing_key=key,
     )
-    return builder.build()
+    bundle = builder.build()
+
+    # Phase 2.1: mirror the bundle metadata into Postgres. crate_sha256
+    # is the sha256 of the DSSE envelope file — the same byte-stream
+    # whose signature is the tamper-evidence anchor for the whole
+    # crate. Failure is logged + swallowed inside mirror_evidence_bundle.
+    try:
+        from core import db_writethrough
+        envelope_path = crate_dir / "manifest.json.dsse"
+        if envelope_path.is_file():
+            db_writethrough.mirror_evidence_bundle(
+                bundle,
+                crate_path=str(crate_dir),
+                crate_sha256=sha256_file(envelope_path),
+                signed_by_keyid=key.keyid,
+            )
+    except Exception:
+        # Belt-and-braces — mirror_evidence_bundle already swallows.
+        pass
+
+    return bundle
 
 
 # ── internal builder ────────────────────────────────

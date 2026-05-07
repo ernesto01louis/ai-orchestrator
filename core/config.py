@@ -129,3 +129,13 @@ TIMEOUT_VAULT_NAS_SYNC = max(15, _settings.timeouts.vault_nas_sync)
 
 # Dream auto-trigger
 DREAM_AUTO_INTERVAL = _settings.dream.auto_interval
+
+# Phase 2.1 Postgres durable store. POSTGRES_DSN in .env wins over the
+# config.json value so secrets stay out of the config file (mirrors the
+# GOTIFY_TOKEN pattern above).
+POSTGRES_ENABLED = _settings.postgres.enabled
+POSTGRES_DSN = os.getenv("POSTGRES_DSN", "") or _settings.postgres.dsn
+POSTGRES_POOL_SIZE = _settings.postgres.pool_size
+POSTGRES_POOL_MAX_OVERFLOW = _settings.postgres.pool_max_overflow
+POSTGRES_STATEMENT_TIMEOUT_MS = _settings.postgres.statement_timeout_ms
+POSTGRES_RECONCILE_ON_STARTUP = _settings.postgres.reconcile_on_startup

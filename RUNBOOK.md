@@ -497,3 +497,122 @@ per-campaign evidence crates live under `campaigns/` (DVC-tracked, on
 TrueNAS). For per-RAG-corpus or per-campaign re-snapshots going forward,
 re-run `scripts/dvc_track.sh` as described in the "Tracking the bulky
 directories" section above.
+
+## Postgres durable store (Phase 2.1)
+
+The orchestrator dual-writes campaigns, runs, evidence-bundle metadata,
+LLM calls, and per-day model stats to Postgres alongside the canonical
+JSON files under `memory/`, `runs/`, `campaigns/`. JSON stays canonical
+— Postgres is the queryable mirror that enables Phase 2.4 budget
+aggregates and Phase 2.6 UI list/filter/sort. Dual-writes are JSON
+first, Postgres second; on Postgres failure the run keeps succeeding
+(structured WARN log + Prometheus counter increment) and
+reconcile-on-startup heals any gap. Toggleable via the
+`postgres.enabled` config flag.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| Postgres server | dedicated LXC (operator's choice — suggested LXC 202) | Debian 12 + postgresql-16 from apt.postgresql.org |
+| Database | `orchestrator` | owned by role `orchestrator` |
+| Auth | scram-sha-256 password from `POSTGRES_DSN` | role can connect from 192.168.2.0/24 (LAN) and 100.64.0.0/10 (Tailscale CGNAT, in case Tailscale is added later) |
+| Daily backup | `/var/backups/postgres/orchestrator-YYYYMMDD-HHMMSS.dump` (cron.daily) | redirect via `BACKUP_DIR=/mnt/nfs/...` env override on the cron — independence from this LXC's filesystem is the whole point |
+| Schema migrations | `alembic upgrade head` from the orchestrator LXC | DSN read directly from `.env`, not via `core.config` |
+
+### One-time Postgres setup
+
+1. On Proxmox: create a fresh Debian 12 LXC. Suggested ID 202, 1 vCPU,
+   2 GB RAM, 20 GB disk. Bridge `vmbr0`. Static IP on the LAN
+   (e.g. `192.168.2.183`).
+2. Generate a password for the `orchestrator` role:
+   ```bash
+   openssl rand -base64 24
+   ```
+3. From the Proxmox host, copy the script in and run it:
+   ```bash
+   pct push 202 /opt/ai-orchestrator/scripts/install_postgres.sh /root/install_postgres.sh
+   pct enter 202
+   POSTGRES_ORCHESTRATOR_PASSWORD='<paste-password>' \
+       bash /root/install_postgres.sh
+   ```
+   The script installs postgresql-16, creates the `orchestrator` role
+   and database, sets `listen_addresses='*'`, scopes `pg_hba.conf` to
+   the LAN + Tailscale CGNAT, and installs the daily `pg_dump` cron.
+4. From orchestrator LXC 200, smoke-test connectivity:
+   ```bash
+   apt-get install -y postgresql-client
+   PGPASSWORD='<password>' psql -h <postgres-lxc-ip> -U orchestrator \
+       -d orchestrator -c 'SELECT version()'
+   ```
+5. Add `POSTGRES_DSN` to `/opt/ai-orchestrator/.env`:
+   ```
+   POSTGRES_DSN=postgresql://orchestrator:<password>@<postgres-lxc-ip>:5432/orchestrator
+   ```
+6. Apply schema migrations from orchestrator LXC 200:
+   ```bash
+   cd /opt/ai-orchestrator && source venv/bin/activate
+   alembic upgrade head
+   ```
+7. Flip `postgres.enabled = true` in `config.json` (under the new
+   `postgres` block) and restart the orchestrator service. On startup,
+   reconcile sweeps existing JSON state into the new Postgres rows
+   (one-shot) and emits a `reconcile_completed` log line.
+
+### Backup independence
+
+The default cron writes dumps to `/var/backups/postgres/` on the
+Postgres LXC's local disk. **This is not "independent" yet** — a disk
+failure on that LXC takes both the live database and its backups. To
+restore the independence property called out in ROADMAP.md:
+
+- Mount NFS or SMB from TrueNAS at `/mnt/nas-pgbackup/` on the Postgres
+  LXC (TrueNAS UI → Sharing → NFS Shares → add an export for
+  `f3/orchestrator-pgbackup`, mode `0750`, owner `postgres`).
+- Edit `/etc/cron.daily/orchestrator-pgdump` and set
+  `BACKUP_DIR=/mnt/nas-pgbackup`. The script honors the override.
+- Verify the next-day cron run leaves a dump under
+  `/mnt/nas-pgbackup/orchestrator-*.dump` and that
+  `find /var/backups/postgres -name 'orchestrator-*.dump' -mtime -1`
+  returns nothing.
+
+### Common Postgres issues
+
+- `psql: error: connection to server ... refused` from orchestrator
+  LXC → check `listen_addresses` is `'*'` in `postgresql.conf` and the
+  postgresql service is running. The script sets these but a
+  pre-existing install might override.
+- `FATAL: no pg_hba.conf entry for host ...` → orchestrator LXC's IP
+  is outside the `192.168.2.0/24` and Tailscale ranges in `pg_hba.conf`.
+  Add an explicit `host orchestrator orchestrator <ip>/32 scram-sha-256`
+  line and `systemctl reload postgresql@16-main`.
+- `FATAL: password authentication failed for user "orchestrator"` →
+  `POSTGRES_DSN` in orchestrator's `.env` doesn't match the password
+  passed to `install_postgres.sh`. Re-run the install script with the
+  correct password (the script's `ALTER ROLE` updates without dropping
+  the database).
+- Reconcile never runs at startup → `postgres.enabled` is still `false`
+  in `config.json`, or `reconcile_on_startup` is `false`. Both default
+  to safe values; flip them once the LXC is up.
+- Dual-write WARN log lines `postgres_writethrough_failed table=runs
+  ...` → the orchestrator can't reach Postgres. Runs keep succeeding
+  (JSON canonical); the missing rows are recovered by reconcile on the
+  next orchestrator restart. Investigate networking between LXC 200
+  and the Postgres LXC.
+
+### Restoring from a pg_dump
+
+```bash
+# On the Postgres LXC, with the orchestrator app stopped:
+sudo -u postgres dropdb orchestrator
+sudo -u postgres createdb -O orchestrator orchestrator
+sudo -u postgres pg_restore --dbname=orchestrator --no-owner \
+    /var/backups/postgres/orchestrator-<timestamp>.dump
+```
+
+JSON files on the orchestrator LXC remain canonical, so even a total
+Postgres-LXC loss is recoverable: rebuild the LXC, re-run
+`install_postgres.sh`, run `alembic upgrade head`, restart the
+orchestrator service, and reconcile-on-startup re-populates every row
+from the JSON state. The `pg_dump` chain is for fast recovery, not
+disaster recovery.

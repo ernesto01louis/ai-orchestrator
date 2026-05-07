@@ -93,7 +93,12 @@ def _load_run_index() -> dict:
 
 
 def _persist_run_index(run_id: str, snapshot: dict) -> None:
-    """Save a completed run's metadata to the persistent run index."""
+    """Save a completed run's metadata to the persistent run index.
+
+    Phase 2.1: after the JSON write succeeds, mirror the row into
+    Postgres via core.db_writethrough. JSON stays canonical — a Postgres
+    write failure is logged + swallowed.
+    """
     try:
         index = _load_run_index()
         index[run_id] = {
@@ -109,6 +114,15 @@ def _persist_run_index(run_id: str, snapshot: dict) -> None:
         with open(RUN_INDEX_FILE, "w") as f:
             json.dump(index, f, indent=2)
     except OSError:
+        return
+    # Lazy import — core.runtime is loaded early in app boot; we don't
+    # want to drag SQLAlchemy in unless someone actually persists a run.
+    try:
+        from core import db_writethrough
+        db_writethrough.mirror_run_completion(run_id, snapshot)
+    except Exception:
+        # mirror_run_completion already swallows; this catch is just
+        # belt-and-braces for an import-time error from db_writethrough.
         pass
 
 

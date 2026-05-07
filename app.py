@@ -114,6 +114,17 @@ async def _lifespan(app_instance):
             print("WARNING: Prefect server unreachable at startup; new runs will use daemon-thread fallback until it returns")
     except Exception as e:
         print(f"WARNING: Prefect server healthcheck failed at startup: {e}")
+
+    # Phase 2.1 reconcile-on-startup: sweep JSON canonical state into
+    # Postgres. No-op when postgres.enabled=false. Runs in a thread so
+    # the async event loop doesn't block on bulk INSERTs.
+    try:
+        from core import config as _config  # noqa: PLC0415
+        if _config.POSTGRES_ENABLED and _config.POSTGRES_RECONCILE_ON_STARTUP:
+            from core.db_reconcile import reconcile_all  # noqa: PLC0415
+            await asyncio.to_thread(reconcile_all)
+    except Exception as e:
+        print(f"WARNING: Postgres reconcile-on-startup failed: {e}")
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield

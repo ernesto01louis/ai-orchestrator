@@ -150,6 +150,27 @@ class DreamConfig(_FlexModel):
     auto_interval: int = 10
 
 
+class PostgresConfig(_FlexModel):
+    """Phase 2.1 durable system-of-record (Postgres in its own LXC).
+
+    JSON files under ``memory/`` / ``runs/`` / ``campaigns/`` remain
+    canonical; Postgres is the queryable mirror. Dual-writes are
+    JSON-first, Postgres-second. Defaults keep the feature dormant
+    (``enabled=False``) so the LXC can come up after the application
+    code has shipped.
+    """
+
+    enabled: bool = False
+    # DSN may be empty when ``enabled=False``. When enabled, the value
+    # in config.json is overridden by the ``POSTGRES_DSN`` env var if
+    # set (see core/config.py for the precedence wiring).
+    dsn: str = ""
+    pool_size: int = 5
+    pool_max_overflow: int = 5
+    statement_timeout_ms: int = 5000
+    reconcile_on_startup: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Top-level settings model
 # ---------------------------------------------------------------------------
@@ -182,3 +203,4 @@ class OrchestratorSettings(_FlexModel):
     mcp_servers: dict[str, object] = {}
     prefect: PrefectConfig = PrefectConfig()
     dream: DreamConfig = DreamConfig()
+    postgres: PostgresConfig = PostgresConfig()

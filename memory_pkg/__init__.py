@@ -81,8 +81,26 @@ def load_campaigns():
     """Load campaigns map keyed by campaign_id (Phase 1.1)."""
     return locked_read_json(CAMPAIGNS_FILE, {})
 
-def save_campaigns(data):
+def save_campaigns(data, changed_ids=None):
+    """Persist the campaigns map to JSON, then mirror to Postgres (Phase 2.1).
+
+    JSON stays canonical. ``changed_ids`` scopes the Postgres dual-write
+    to the campaigns the caller actually mutated; when ``None`` (the
+    default — used by reconcile-on-startup), every campaign in the map
+    is upserted.
+
+    A Postgres failure is logged + swallowed inside db_writethrough; the
+    JSON write must complete first or the dual-write is skipped.
+    """
     locked_write_json(CAMPAIGNS_FILE, data)
+    try:
+        # Lazy import — most memory_pkg consumers don't need core.db.
+        from core import db_writethrough
+        db_writethrough.mirror_campaigns(data, changed_ids=changed_ids)
+    except Exception:
+        # mirror_campaigns already swallows; this catch covers a stray
+        # import-time error so save_campaigns never raises.
+        pass
 
 
 # ------------------------------------------------
@@ -320,6 +338,24 @@ def update_model_stats(model, role, language, score, was_winner, succeeded,
         s["recent_scores"] = s["recent_scores"][-20:]
 
     save_model_stats(stats)
+
+    # Phase 2.1 dual-write: mirror today's row into Postgres.
+    # Counters increment atomically; jsonb breakdowns are best-effort
+    # snapshots of the JSON aggregate (reconcile re-syncs on startup).
+    try:
+        from core import db_writethrough
+        db_writethrough.mirror_model_stats_daily(
+            model=model,
+            score=score,
+            was_winner=was_winner,
+            succeeded=succeeded,
+            by_language=s.get("by_language"),
+            by_role=s.get("by_role"),
+            by_project_type=s.get("by_project_type"),
+        )
+    except Exception:
+        # mirror_model_stats_daily already swallows; this is belt-and-braces.
+        pass
 
 
 def get_model_recommendation(language, project_type):
