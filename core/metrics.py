@@ -78,3 +78,47 @@ def observe_llm_call(role: str, model: str, *, success: bool) -> None:
         model=model or "unknown",
         outcome="success" if success else "failure",
     ).inc()
+
+
+# ── Phase 2.1 Postgres write-through metrics ────────────────────────────
+#
+# Visibility for the dual-write path. Cardinality is bounded: ``table`` is
+# one of {runs, campaigns, llm_calls, evidence_bundles, model_stats_daily}
+# and ``outcome`` is one of {success, failure}. Reconcile metrics use the
+# same ``table`` set without an outcome label (we count successful inserts
+# only — failures already increment ``orchestrator_postgres_writethrough``
+# with table=… outcome=failure).
+
+POSTGRES_WRITETHROUGH_TOTAL = Counter(
+    "orchestrator_postgres_writethrough_total",
+    "Total dual-write attempts to Postgres mirror tables.",
+    ["table", "outcome"],  # outcome in {"success", "failure"}
+)
+
+POSTGRES_RECONCILE_ROWS_TOTAL = Counter(
+    "orchestrator_postgres_reconcile_rows_total",
+    "Rows written to each table during reconcile-on-startup.",
+    ["table"],
+)
+
+POSTGRES_RECONCILE_DURATION_SECONDS = Histogram(
+    "orchestrator_postgres_reconcile_duration_seconds",
+    "Wall-clock duration of one reconcile-on-startup pass (seconds).",
+)
+
+
+def observe_postgres_writethrough(table: str, *, success: bool) -> None:
+    POSTGRES_WRITETHROUGH_TOTAL.labels(
+        table=table or "unknown",
+        outcome="success" if success else "failure",
+    ).inc()
+
+
+def observe_postgres_reconcile_rows(table: str, rows: int) -> None:
+    if rows <= 0:
+        return
+    POSTGRES_RECONCILE_ROWS_TOTAL.labels(table=table or "unknown").inc(rows)
+
+
+def observe_postgres_reconcile_duration(seconds: float) -> None:
+    POSTGRES_RECONCILE_DURATION_SECONDS.observe(max(seconds, 0.0))

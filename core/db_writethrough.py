@@ -118,6 +118,16 @@ def _campaign_record_to_row(
 # ---------------------------------------------------------------------------
 
 
+def _observe(table: str, success: bool) -> None:
+    """Increment the dual-write counter without coupling to metrics."""
+    try:
+        from core.metrics import observe_postgres_writethrough
+        observe_postgres_writethrough(table, success=success)
+    except Exception:
+        # Never let observability fail the writethrough path.
+        pass
+
+
 def mirror_run_completion(run_id: str, snapshot: dict[str, Any]) -> None:
     """Mirror a completed run into the runs table.
 
@@ -130,7 +140,9 @@ def mirror_run_completion(run_id: str, snapshot: dict[str, Any]) -> None:
         row = _run_snapshot_to_row(run_id, snapshot)
         with db.get_session() as session:
             db_models.upsert_run(session, row)
+        _observe("runs", success=True)
     except Exception as exc:
+        _observe("runs", success=False)
         log.warning(
             "postgres_writethrough_failed",
             extra={
@@ -168,7 +180,9 @@ def mirror_campaigns(
                     continue
                 row = _campaign_record_to_row(cid, record)
                 db_models.upsert_campaign(session, row)
+        _observe("campaigns", success=True)
     except Exception as exc:
+        _observe("campaigns", success=False)
         log.warning(
             "postgres_writethrough_failed",
             extra={
@@ -229,7 +243,9 @@ def mirror_evidence_bundle(
         }
         with db.get_session() as session:
             db_models.insert_evidence_bundle(session, row)
+        _observe("evidence_bundles", success=True)
     except Exception as exc:
+        _observe("evidence_bundles", success=False)
         log.warning(
             "postgres_writethrough_failed",
             extra={
@@ -263,7 +279,9 @@ def mirror_llm_call(record: Any) -> None:
         row = _llm_call_record_to_row(record)
         with db.get_session() as session:
             db_models.insert_llm_call(session, row)
+        _observe("llm_calls", success=True)
     except Exception as exc:
+        _observe("llm_calls", success=False)
         log.warning(
             "postgres_writethrough_failed",
             extra={
@@ -318,7 +336,9 @@ def mirror_model_stats_daily(
         }
         with db.get_session() as session:
             db_models.upsert_model_stats_daily(session, delta)
+        _observe("model_stats_daily", success=True)
     except Exception as exc:
+        _observe("model_stats_daily", success=False)
         log.warning(
             "postgres_writethrough_failed",
             extra={

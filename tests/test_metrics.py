@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Endpoint tests
 # ---------------------------------------------------------------------------
@@ -165,3 +167,100 @@ def test_state_hook_on_cancelled_increments_aborted():
     before = RUNS_TOTAL.labels(status="aborted")._value.get()
     on_cancelled(flow, flow_run, state)
     assert RUNS_TOTAL.labels(status="aborted")._value.get() == before + 1
+
+
+# ─── Phase 2.1.13 — Postgres write-through + reconcile metrics ──────────
+
+
+def test_observe_postgres_writethrough_success_increments():
+    from core.metrics import (
+        POSTGRES_WRITETHROUGH_TOTAL,
+        observe_postgres_writethrough,
+    )
+
+    before = POSTGRES_WRITETHROUGH_TOTAL.labels(
+        table="runs", outcome="success"
+    )._value.get()
+    observe_postgres_writethrough("runs", success=True)
+    assert (
+        POSTGRES_WRITETHROUGH_TOTAL.labels(table="runs", outcome="success")._value.get()
+        == before + 1
+    )
+
+
+def test_observe_postgres_writethrough_failure_increments():
+    from core.metrics import (
+        POSTGRES_WRITETHROUGH_TOTAL,
+        observe_postgres_writethrough,
+    )
+
+    before = POSTGRES_WRITETHROUGH_TOTAL.labels(
+        table="campaigns", outcome="failure"
+    )._value.get()
+    observe_postgres_writethrough("campaigns", success=False)
+    assert (
+        POSTGRES_WRITETHROUGH_TOTAL.labels(table="campaigns", outcome="failure")._value.get()
+        == before + 1
+    )
+
+
+def test_observe_postgres_reconcile_rows_skips_zero():
+    from core.metrics import (
+        POSTGRES_RECONCILE_ROWS_TOTAL,
+        observe_postgres_reconcile_rows,
+    )
+
+    before = POSTGRES_RECONCILE_ROWS_TOTAL.labels(table="runs")._value.get()
+    observe_postgres_reconcile_rows("runs", 0)
+    # zero rows must not increment
+    assert (
+        POSTGRES_RECONCILE_ROWS_TOTAL.labels(table="runs")._value.get() == before
+    )
+    observe_postgres_reconcile_rows("runs", 5)
+    assert (
+        POSTGRES_RECONCILE_ROWS_TOTAL.labels(table="runs")._value.get()
+        == before + 5
+    )
+
+
+def test_observe_postgres_reconcile_duration_records():
+    from core.metrics import (
+        POSTGRES_RECONCILE_DURATION_SECONDS,
+        observe_postgres_reconcile_duration,
+    )
+
+    before_count = POSTGRES_RECONCILE_DURATION_SECONDS._sum.get()
+    observe_postgres_reconcile_duration(0.42)
+    after_count = POSTGRES_RECONCILE_DURATION_SECONDS._sum.get()
+    assert after_count - before_count == pytest.approx(0.42)
+
+
+def test_writethrough_increments_metric_on_success(
+    monkeypatch,
+):
+    """End-to-end: a successful mirror_run_completion increments
+    orchestrator_postgres_writethrough_total{table=runs,outcome=success}."""
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock as _MM
+
+    from core import db, db_writethrough
+    from core.metrics import POSTGRES_WRITETHROUGH_TOTAL
+
+    monkeypatch.setattr(db, "is_enabled", lambda: True)
+    fake_session = _MM(name="MockSession")
+
+    @contextmanager
+    def _fake_get_session():
+        yield fake_session
+
+    monkeypatch.setattr(db, "get_session", _fake_get_session)
+    monkeypatch.setattr("core.db_models.upsert_run", _MM())
+
+    before = POSTGRES_WRITETHROUGH_TOTAL.labels(
+        table="runs", outcome="success"
+    )._value.get()
+    db_writethrough.mirror_run_completion("run-metrics", {"phase": "completed"})
+    assert (
+        POSTGRES_WRITETHROUGH_TOTAL.labels(table="runs", outcome="success")._value.get()
+        == before + 1
+    )

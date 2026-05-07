@@ -268,7 +268,8 @@ def reconcile_all() -> dict[str, Any]:
         log.warning("reconcile_session_failed", extra={"error": repr(exc)})
         return {"error": repr(exc), **counts}
 
-    duration_ms = int((time.monotonic() - started) * 1000)
+    duration_seconds = time.monotonic() - started
+    duration_ms = int(duration_seconds * 1000)
     log.info(
         "reconcile_completed runs=%d campaigns=%d bundles=%d seed_rows=%d duration_ms=%d",
         counts["runs"],
@@ -277,4 +278,23 @@ def reconcile_all() -> dict[str, Any]:
         counts["model_stats_seed_rows"],
         duration_ms,
     )
+    # Phase 2.1.13 metrics — bounded-cardinality counters for the
+    # reconcile sweep. Wrapped so a metrics import failure can't take
+    # down the lifespan startup.
+    try:
+        from core.metrics import (
+            observe_postgres_reconcile_duration,
+            observe_postgres_reconcile_rows,
+        )
+        observe_postgres_reconcile_rows("runs", counts["runs"])
+        observe_postgres_reconcile_rows("campaigns", counts["campaigns"])
+        observe_postgres_reconcile_rows(
+            "evidence_bundles", counts["evidence_bundles"]
+        )
+        observe_postgres_reconcile_rows(
+            "model_stats_daily", counts["model_stats_seed_rows"]
+        )
+        observe_postgres_reconcile_duration(duration_seconds)
+    except Exception:
+        pass
     return {**counts, "duration_ms": duration_ms}
