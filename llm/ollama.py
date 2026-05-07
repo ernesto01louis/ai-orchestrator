@@ -45,9 +45,10 @@ class LlmResponse:
 
 
 # ── model-aware URL routing ────────────────────────
-_url_cache: dict = {}
+_url_cache: dict[str, str] = {}
 _url_cache_ts: float = 0.0
 _URL_CACHE_TTL = 300  # seconds
+_url_cache_lock = threading.Lock()
 
 
 # ── /api/show metadata cache (Phase J β) ───────────
@@ -111,20 +112,24 @@ def _annotate_envelope(
     return envelope
 
 
-def _refresh_url_cache():
+def _refresh_url_cache() -> None:
     global _url_cache, _url_cache_ts
-    cache: dict = {}
-    # Check each unique server; main is preferred so check last (so it wins on conflict)
-    for base_url in dict.fromkeys([OLLAMA_JUDGE_URL, OLLAMA_MAIN_URL]):
-        try:
-            r = requests.get(f"{base_url}/api/tags", timeout=5)
-            if r.ok:
-                for m in r.json().get("models", []):
-                    cache[m["name"]] = base_url
-        except (requests.exceptions.RequestException, ValueError):
-            pass
-    _url_cache = cache
-    _url_cache_ts = time.time()
+    with _url_cache_lock:
+        # Double-check: another thread may have refreshed while we waited.
+        if time.time() - _url_cache_ts <= _URL_CACHE_TTL:
+            return
+        cache: dict[str, str] = {}
+        # Check each unique server; main is preferred so check last (so it wins on conflict)
+        for base_url in dict.fromkeys([OLLAMA_JUDGE_URL, OLLAMA_MAIN_URL]):
+            try:
+                r = requests.get(f"{base_url}/api/tags", timeout=5)
+                if r.ok:
+                    for m in r.json().get("models", []):
+                        cache[m["name"]] = base_url
+            except (requests.exceptions.RequestException, ValueError):
+                pass
+        _url_cache = cache
+        _url_cache_ts = time.time()
 
 
 def resolve_chat_url(model: str) -> str:
