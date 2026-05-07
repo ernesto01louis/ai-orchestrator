@@ -201,6 +201,46 @@ def _llm_call_record_to_row(record: Any) -> dict[str, Any]:
     }
 
 
+def mirror_evidence_bundle(
+    bundle: Any,
+    *,
+    crate_path: str,
+    crate_sha256: str,
+    signed_by_keyid: str | None = None,
+) -> None:
+    """Mirror an evidence-bundle into the evidence_bundles table.
+
+    Called from ``evidence.builder.build_bundle`` AFTER the RO-Crate
+    is written to disk and signed. We index the on-disk crate (path +
+    DSSE-envelope sha256) — never duplicate the JSON-LD payload into
+    Postgres.
+    """
+    if not db.is_enabled():
+        return
+    try:
+        row = {
+            "bundle_id": bundle.bundle_id,
+            "campaign_id": bundle.campaign_id,
+            "schema_version": getattr(bundle, "schema_version", "1.0.0"),
+            "crate_path": crate_path,
+            "crate_sha256": crate_sha256,
+            "created_at": bundle.created_at,
+            "signed_by_keyid": signed_by_keyid,
+        }
+        with db.get_session() as session:
+            db_models.insert_evidence_bundle(session, row)
+    except Exception as exc:
+        log.warning(
+            "postgres_writethrough_failed",
+            extra={
+                "table": "evidence_bundles",
+                "bundle_id": getattr(bundle, "bundle_id", ""),
+                "campaign_id": getattr(bundle, "campaign_id", ""),
+                "error": repr(exc),
+            },
+        )
+
+
 def mirror_llm_call(record: Any) -> None:
     """Eagerly mirror one LlmCallRecord into the llm_calls table.
 
@@ -237,6 +277,7 @@ def mirror_llm_call(record: Any) -> None:
 
 __all__ = [
     "mirror_campaigns",
+    "mirror_evidence_bundle",
     "mirror_llm_call",
     "mirror_run_completion",
 ]

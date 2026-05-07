@@ -383,3 +383,82 @@ def test_mirror_llm_call_swallows_db_exception(
     assert any(
         "postgres_writethrough_failed" in r.message for r in caplog.records
     )
+
+
+# ---------------------------------------------------------------------------
+# mirror_evidence_bundle (2.1.9)
+# ---------------------------------------------------------------------------
+
+
+class _FakeBundle:
+    """Stand-in for evidence.EvidenceBundle (Pydantic). The DAO only
+    cares about a handful of attributes; constructing a real Pydantic
+    instance pulls the entire evidence subsystem so we use a plain
+    namespace."""
+
+    def __init__(
+        self,
+        bundle_id: str = "bundle-ulid-1",
+        campaign_id: str = "camp-1",
+        schema_version: str = "1.0.0",
+    ) -> None:
+        self.bundle_id = bundle_id
+        self.campaign_id = campaign_id
+        self.schema_version = schema_version
+        self.created_at = datetime(2026, 5, 7, 12, 0, tzinfo=db_writethrough.UTC)
+
+
+def test_mirror_evidence_bundle_no_op_when_disabled(
+    disabled_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spy = MagicMock(side_effect=AssertionError("get_session called when disabled"))
+    monkeypatch.setattr(db, "get_session", spy)
+    db_writethrough.mirror_evidence_bundle(
+        _FakeBundle(),
+        crate_path="/tmp/x",
+        crate_sha256="deadbeef",
+        signed_by_keyid="key-1",
+    )
+    spy.assert_not_called()
+
+
+def test_mirror_evidence_bundle_calls_insert_evidence_bundle(
+    enabled_db_capturing_session: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spy = MagicMock()
+    monkeypatch.setattr("core.db_models.insert_evidence_bundle", spy)
+    db_writethrough.mirror_evidence_bundle(
+        _FakeBundle(bundle_id="b1", campaign_id="c1"),
+        crate_path="/opt/campaigns/c1",
+        crate_sha256="deadbeefcafe",
+        signed_by_keyid="ed25519-key-aabb",
+    )
+    spy.assert_called_once()
+    session_arg, row = spy.call_args.args
+    assert session_arg is enabled_db_capturing_session["session"]
+    assert row["bundle_id"] == "b1"
+    assert row["campaign_id"] == "c1"
+    assert row["crate_path"] == "/opt/campaigns/c1"
+    assert row["crate_sha256"] == "deadbeefcafe"
+    assert row["signed_by_keyid"] == "ed25519-key-aabb"
+    assert row["schema_version"] == "1.0.0"
+
+
+def test_mirror_evidence_bundle_swallows_db_exception(
+    enabled_db_capturing_session: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        "core.db_models.insert_evidence_bundle",
+        MagicMock(side_effect=RuntimeError("postgres down")),
+    )
+    db_writethrough.mirror_evidence_bundle(
+        _FakeBundle(),
+        crate_path="/tmp/x",
+        crate_sha256="abc",
+    )
+    assert any(
+        "postgres_writethrough_failed" in r.message for r in caplog.records
+    )
