@@ -156,3 +156,13 @@ OTEL_ENABLED = _settings.otel.enabled
 OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "") or _settings.otel.endpoint
 OTEL_SERVICE_NAME = _settings.otel.service_name
 OTEL_SAMPLE_RATIO = _settings.otel.sample_ratio
+
+# Phase 2.4 budget tracking. Rates and thresholds live in config.json
+# (no secrets). Materialise the rate map as a plain dict so callers
+# don't carry a Pydantic dependency through their type signatures.
+BUDGET_ENABLED = _settings.budget.enabled
+BUDGET_RATES = {
+    name: rate.model_dump()
+    for name, rate in _settings.budget.rates_per_million_tokens.items()
+}
+BUDGET_THRESHOLDS_PCT = list(_settings.budget.thresholds_pct)

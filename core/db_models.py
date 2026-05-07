@@ -56,6 +56,17 @@ class Campaign(Base):
     completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     merkle_root: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     merkle_status: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    # Phase 2.4 budget tracking. ``budget_total_usd`` is operator-set;
+    # NULL = no ceiling (still tracks usage). ``budget_used_usd`` is the
+    # running total — see core/budget.py and the on_task_completion
+    # hook for how it's accrued. ``budget_state`` is constrained by the
+    # CHECK in alembic 0002 to {ok, warning, breach, paused}.
+    budget_total_usd: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    budget_used_usd: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0.0)
+    budget_state: Mapped[str] = mapped_column(sa.Text, nullable=False, default="ok")
+    budget_thresholds_emitted: Mapped[list[int]] = mapped_column(
+        JSONB, nullable=False, default=list,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +115,12 @@ class LlmCall(Base):
     started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     duration_ms: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     response_tokens: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    # Phase 2.4 budget. ``prompt_tokens`` is the input side
+    # (Ollama's ``prompt_eval_count``); ``cost_usd`` is the rate-table
+    # × token-counts product computed by core/budget.cost_usd_for in
+    # the on_task_completion state hook before the row is upserted.
+    prompt_tokens: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    cost_usd: Mapped[float] = mapped_column(sa.Float, nullable=False, default=0.0)
     sampling: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     rendered_messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     response_text: Mapped[str] = mapped_column(sa.Text, nullable=False, default="")
@@ -192,6 +209,11 @@ _CAMPAIGN_UPSERT_COLUMNS: tuple[str, ...] = (
     "completed_at",
     "merkle_root",
     "merkle_status",
+    # Phase 2.4 budget columns (alembic 0002_budget_tracking).
+    "budget_total_usd",
+    "budget_used_usd",
+    "budget_state",
+    "budget_thresholds_emitted",
 )
 
 

@@ -146,3 +146,24 @@ def observe_redis_run_status_write(operation: str, *, success: bool) -> None:
         operation=operation or "unknown",
         outcome="success" if success else "failure",
     ).inc()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.4 budget metrics
+# ---------------------------------------------------------------------------
+# Cardinality bounded — ``threshold`` is one of {50, 80, 100} (the
+# default thresholds_pct), ``state`` is in {ok, warning, breach,
+# paused}. No campaign_id label (stays low-cardinality; Grafana
+# correlates by campaign_id via logs).
+
+BUDGET_THRESHOLD_TOTAL = Counter(
+    "orchestrator_budget_threshold_total",
+    "Budget threshold crossings by percentage and resulting state.",
+    ["threshold", "state"],
+)
+
+
+def observe_budget_threshold(threshold_pct: int, state: str) -> None:
+    BUDGET_THRESHOLD_TOTAL.labels(
+        threshold=str(threshold_pct), state=state or "unknown",
+    ).inc()

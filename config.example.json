@@ -132,5 +132,13 @@
     "endpoint": "",
     "service_name": "ai-orchestrator",
     "sample_ratio": 1.0
+  },
+  "budget": {
+    "_comment": "Phase 2.4 budget tracking. rates_per_million_tokens is keyed by model name; the 'default' entry is the fallback. Local Ollama models default to 0.0 (electricity is below the measurement threshold). thresholds_pct fires notifications at each crossing; 100 also auto-pauses the campaign.",
+    "enabled": false,
+    "rates_per_million_tokens": {
+      "default": {"prompt": 0.0, "completion": 0.0}
+    },
+    "thresholds_pct": [50, 80, 100]
   }
 }

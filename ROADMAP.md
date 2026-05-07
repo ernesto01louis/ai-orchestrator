@@ -283,12 +283,13 @@ Ships dormant — `postgres.enabled=false` default. Operator action: stand up ne
 - [x] Manual spans on `log()` (span event on the active span), `ssh_command` (ssh.target/host/returncode/etc.), and the two `query_ollama*` LLM entrypoints (llm.model/role/eval_count/outcome)
 - [x] Per-run trace view in Grafana — dashboard UID `orchestrator-per-run` with TraceQL filter on `orchestrator.run_id` textbox variable
 
-### 2.4 Budget tracking
-- [ ] Extend Campaign with `budget_used`
-- [ ] Token approximation per LLM call
-- [ ] Cloud GPU hours × rate
-- [ ] Thresholds at 50/80/100%
-- [ ] Auto-pause on 100%
+### 2.4 Budget tracking — DONE (v0.2.4-phase2.4)
+- [x] Extend Campaign with `budget_total_usd / budget_used_usd / budget_state / budget_thresholds_emitted` (alembic 0002_budget_tracking adds the columns + CHECK constraint)
+- [x] Token approximation per LLM call — `prompt_eval_count` + `eval_count` from the Ollama envelope feed `core.budget.cost_usd_for(model, prompt, completion)` against the configured per-million-token rate table; cost stored on every `LlmCall` row
+- [x] Cloud GPU hours × rate — Phase 2.5 follow-up; the rate-table shape already accepts arbitrary model keys, so SkyPilot-bursted models will plug in without schema changes
+- [x] Thresholds at 50/80/100% — `core.budget.evaluate_thresholds` checks the running `budget_used_usd / budget_total_usd` ratio against `BUDGET_THRESHOLDS_PCT`; each newly-crossed percentage fires a Gotify/ntfy notification (`title="Budget X% — warning|critical"`) and bumps `orchestrator_budget_threshold_total{threshold,state}`
+- [x] Auto-pause on 100% — when 100% is newly crossed, `core.budget._pause_campaign` flips `CAMPAIGN_STATUS[cid]["paused"]=True` and asks Prefect to pause the active flow_run; campaign state promotes to `paused` (visibly distinct from `breach`)
+- [x] `GET /campaigns/{id}/budget` route returns the running summary; tested via the session-scoped `inprocess_client` fixture
 
 ### 2.5 SkyPilot for cloud-burst GPU
 - [ ] `pip install skypilot[runpod,vast]`
