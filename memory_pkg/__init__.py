@@ -109,9 +109,20 @@ def save_campaigns(data, changed_ids=None):
 
 def generate_embedding(text):
 
+    # Phase 2.2.4: prefer Redis for embedding cache (multi-instance share).
+    # Redis returns None on miss / disabled / error; we fall through to the
+    # JSON cache (today's behaviour) in that case.
+    from core import redis_cache, config as _config  # noqa: PLC0415
+    redis_hit = redis_cache.embed_cache_get(text)
+    if redis_hit is not None:
+        return redis_hit
+
     cache = load_embed_cache()
 
     if text in cache:
+        # Lazy promote the JSON-cached value into Redis so the next
+        # instance to ask gets it from there.
+        redis_cache.embed_cache_set(text, cache[text], _config.REDIS_EMBED_CACHE_TTL)
         return cache[text]
 
     try:
@@ -135,6 +146,9 @@ def generate_embedding(text):
         else:
             raise RuntimeError(f"Invalid embedding response: {list(data.keys())}")
 
+        # Write through to BOTH Redis (fast cross-instance) and JSON
+        # (restart-survival when Redis is disabled or evicted by LRU).
+        redis_cache.embed_cache_set(text, emb, _config.REDIS_EMBED_CACHE_TTL)
         cache[text] = emb
 
         # evict oldest entries if cache exceeds limit
