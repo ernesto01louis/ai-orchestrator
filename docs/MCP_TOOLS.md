@@ -44,6 +44,31 @@ For a single-shot snapshot:
 contract = await session.read_resource("orchestrator://contract")
 ```
 
+## Per-tool metadata
+
+Every tool advertises both standard MCP `ToolAnnotations` (a hint to the
+client) and an orchestrator-specific freeform `meta` dict.
+
+**Annotations** — boolean hints, MCP-standard:
+
+| Field             | Meaning                                                    |
+|-------------------|------------------------------------------------------------|
+| `readOnlyHint`    | Tool only reads orchestrator state.                        |
+| `destructiveHint` | Tool can destroy or overwrite irretrievable state.         |
+| `idempotentHint`  | Calling N times produces the same effect as calling once.  |
+| `openWorldHint`   | Tool reaches outside the orchestrator process (SSH, HTTP). |
+
+**`meta`** — orchestrator-specific, freeform JSON:
+
+| Field              | Type   | Meaning                                                  |
+|--------------------|--------|----------------------------------------------------------|
+| `category`         | string | One of `orchestration`, `memory`, `ops`, `agent_config`. |
+| `requires_target`  | bool   | Tool needs a `deploy_target` argument referring to an SSH-reachable device.   |
+
+External clients can read these fields from each entry in
+`orchestrator://contract`'s `tools` array, or via the MCP-standard
+`tools/list` request.
+
 ## Tools
 
 ### `orchestrate`
@@ -51,6 +76,10 @@ contract = await session.read_resource("orchestrator://contract")
 Submit an orchestration job. Generates, tests, judges, and deploys code to a
 target device. Spawns a background thread and returns immediately with a
 `run_id` for polling.
+
+**Category:** orchestration
+**Annotations:** openWorldHint
+**Requires target:** yes
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
@@ -86,6 +115,10 @@ On invalid `deploy_target`:
 
 Check the status of an orchestration run.
 
+**Category:** orchestration
+**Annotations:** readOnlyHint, idempotentHint
+**Requires target:** no
+
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `run_id` | `str` | required | The run ID returned by `orchestrate` |
@@ -102,6 +135,10 @@ Key fields present while running: `phase`, `completed` (bool), `project`,
 
 Get the final result of a completed orchestration run, including generated
 files and scores.
+
+**Category:** orchestration
+**Annotations:** readOnlyHint, idempotentHint
+**Requires target:** no
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
@@ -120,6 +157,10 @@ files and scores.
 
 List all available deploy targets (Raspberry Pi devices) with their SSH
 details.
+
+**Category:** ops
+**Annotations:** readOnlyHint, idempotentHint
+**Requires target:** no
 
 No arguments.
 
@@ -141,6 +182,10 @@ No arguments.
 List all Ollama models currently available across all LXC containers.
 Refreshes the URL cache before returning.
 
+**Category:** ops
+**Annotations:** readOnlyHint, idempotentHint, openWorldHint
+**Requires target:** no
+
 No arguments.
 
 **Returns:**
@@ -161,6 +206,10 @@ No arguments.
 Trigger a Dream memory consolidation cycle. Cleans, deduplicates, and
 optimizes the orchestrator's memory layers.
 
+**Category:** memory
+**Annotations:** (none set — mutates memory state)
+**Requires target:** no
+
 No arguments.
 
 **Returns:** a health report dict from `dream.run_dream`, including
@@ -171,6 +220,10 @@ No arguments.
 ### `add_safety_gate`
 
 Add a manual safety gate rule that blocks or warns on matching commands.
+
+**Category:** ops
+**Annotations:** (none set — mutates gate state)
+**Requires target:** no
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
@@ -188,6 +241,10 @@ Add a manual safety gate rule that blocks or warns on matching commands.
 Reload all agent configurations from the `agents/` folder. Use after editing
 prompt templates or `agent.yaml` files.
 
+**Category:** agent_config
+**Annotations:** idempotentHint
+**Requires target:** no
+
 No arguments.
 
 **Returns:**
@@ -202,6 +259,10 @@ No arguments.
 
 Update a prompt template for an agent role. Changes take effect on the next
 orchestration run.
+
+**Category:** agent_config
+**Annotations:** idempotentHint
+**Requires target:** no
 
 | Argument | Type | Default | Description |
 |---|---|---|---|

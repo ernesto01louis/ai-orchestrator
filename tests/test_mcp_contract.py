@@ -92,3 +92,43 @@ def _resource_handler(uri: str):
         if str(r.uri) == uri:
             return r.fn
     raise LookupError(f"no resource registered at {uri!r}")
+
+
+def test_every_tool_has_category_meta() -> None:
+    payload = json.loads(_resource_handler("orchestrator://contract")())
+    valid = {"orchestration", "memory", "ops", "agent_config"}
+    for tool in payload["tools"]:
+        meta = tool.get("meta") or {}
+        assert "category" in meta, f"{tool['name']} missing meta.category"
+        assert meta["category"] in valid, (
+            f"{tool['name']} has unknown category {meta['category']!r}"
+        )
+
+
+def test_every_tool_has_requires_target_meta() -> None:
+    payload = json.loads(_resource_handler("orchestrator://contract")())
+    for tool in payload["tools"]:
+        meta = tool.get("meta") or {}
+        assert "requires_target" in meta, (
+            f"{tool['name']} missing meta.requires_target"
+        )
+        assert isinstance(meta["requires_target"], bool)
+
+
+def test_every_tool_has_annotations() -> None:
+    payload = json.loads(_resource_handler("orchestrator://contract")())
+    for tool in payload["tools"]:
+        ann = tool.get("annotations") or {}
+        # All 4 hints must be present (each may be None|bool — None means "unspecified").
+        for key in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
+            assert key in ann, f"{tool['name']} missing annotations.{key}"
+
+
+def test_only_orchestrate_requires_target() -> None:
+    payload = json.loads(_resource_handler("orchestrator://contract")())
+    require_target = {
+        t["name"] for t in payload["tools"] if (t.get("meta") or {}).get("requires_target")
+    }
+    assert require_target == {"orchestrate"}, (
+        f"unexpected requires_target tools: {require_target}"
+    )
