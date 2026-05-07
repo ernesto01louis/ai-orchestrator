@@ -876,3 +876,88 @@ Set `otel.enabled=false` in `config.json` and restart. Manual span
 sites (log, ssh_command, LLM calls) all delegate to OTel's no-op
 TracerProvider; the cost is a single attribute read per call. The
 Tempo LXC can be shut down without affecting the orchestrator.
+
+## Grafana dashboards (Phase 2.3)
+
+Grafana is the visualization layer for Phase 2.3 traces (via Tempo)
+and Phase 1.8.5 metrics (via the orchestrator's own `/metrics`
+endpoint). Datasources and dashboards are auto-provisioned by
+``scripts/install_grafana.sh`` from YAML / JSON files under
+``/etc/grafana/provisioning/`` and ``/var/lib/grafana/dashboards/``.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| Grafana server | dedicated LXC (operator's choice — suggested LXC 205) | Debian 12 + grafana-oss 12.4.3 from `apt.grafana.com` |
+| HTTP UI | `<grafana-lxc-ip>:3000` | basic-auth with admin / `<grafana-admin-password>` |
+| Tempo datasource | UID `tempo-orchestrator` | proxies queries to `<tempo-lxc-ip>:3200` |
+| Prometheus datasource | UID `prometheus-orchestrator` | proxies to orchestrator's `/metrics` (no separate Prometheus server in Phase 2.3) |
+| Per-run trace dashboard | UID `orchestrator-per-run` | TraceQL filter on `orchestrator.run_id`; paste the run_id in the textbox |
+
+### One-time Grafana setup
+
+1. On Proxmox: create a fresh Debian 12 LXC. Suggested ID 205, 1 vCPU,
+   2 GB RAM, 8 GB disk. Bridge `vmbr0`. Static IP on the LAN
+   (e.g. `192.168.2.188`).
+2. From the Proxmox host, copy the script in and run it:
+   ```bash
+   pct push 205 /opt/ai-orchestrator/scripts/install_grafana.sh /root/install_grafana.sh
+   pct enter 205
+   bash /root/install_grafana.sh
+   ```
+   The script installs `grafana=12.4.3` from `apt.grafana.com`,
+   generates a URL-safe alphanumeric admin password (printed at the
+   end — save it then), writes the password into
+   `[security].admin_password` of `grafana.ini`, removes the SQLite
+   `grafana.db` so first-boot user creation picks up the new
+   password, provisions the Tempo + Prometheus datasources, drops
+   the per-run trace lookup dashboard at
+   `/var/lib/grafana/dashboards/orchestrator/per-run-traces.json`,
+   and starts grafana-server.
+   **Pre-set** `GRAFANA_ADMIN_PASSWORD` / `TEMPO_URL` /
+   `PROMETHEUS_URL` env vars to override defaults.
+   **Why pin to 12.4.3?** Grafana 13.0.1 has a regression where
+   `grafana-cli admin reset-admin-password` writes a hash that the
+   running server rejects (verified 2026-05-07). 12.4.3 is the
+   current LTS; bump `GRAFANA_VERSION` once 13.x is fixed.
+3. From any LAN host, browse to `http://<grafana-lxc-ip>:3000` and
+   log in as `admin` / `<password>`. The "AI Orchestrator — Per-run
+   traces" dashboard appears automatically.
+4. To verify datasources via API:
+   ```bash
+   curl -u admin:<pass> http://<grafana-lxc-ip>:3000/api/datasources
+   # Should list Tempo + Prometheus.
+   curl -u admin:<pass> \
+       'http://<grafana-lxc-ip>:3000/api/datasources/proxy/uid/tempo-orchestrator/api/echo'
+   # Should return "echo" — confirms Grafana → Tempo connectivity.
+   ```
+
+### Common Grafana issues
+
+- HTTP 401 with `[password-auth.invalid] invalid password` after
+  install → the brute-force lockout kicked in OR you're hitting the
+  Grafana 13 reset-admin-password regression. Stop the service,
+  remove `/var/lib/grafana/grafana.db`, restart — first-boot user
+  creation picks up `[security].admin_password` from `grafana.ini`.
+- `too many consecutive incorrect login attempts for user — login
+  for user temporarily blocked` → 5 failed attempts triggered
+  Grafana's brute-force protection. Wait ~5min OR clear via
+  `sqlite3 /var/lib/grafana/grafana.db 'DELETE FROM login_attempt;'`
+  (admin recovery only — never a normal flow).
+- Plugin install error in journalctl
+  (`unlinkat /usr/share/grafana/data/plugins-bundled/elasticsearch:
+  read-only file system`) → harmless. The bundled-plugin
+  auto-update tries to upgrade itself but the bundle dir is
+  read-only on packaged installs. Functionality unaffected.
+- Empty trace search → confirm `otel.enabled=true` in orchestrator
+  config and traffic has flowed since the last orchestrator restart.
+  `BatchSpanProcessor` flushes on a 5s interval — wait at least 6s
+  after the last call before querying.
+
+### Disabling Grafana
+
+The Grafana LXC is a pure consumer of Tempo + the orchestrator's
+`/metrics` — shutting it down has zero impact on the orchestrator.
+`systemctl stop grafana-server` on the Grafana LXC, or `pct stop
+205` from Proxmox, both work cleanly.
