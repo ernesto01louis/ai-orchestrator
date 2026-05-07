@@ -190,6 +190,30 @@ description from a vision model when available.
   introspects FastMCP at call time.
 - Human docs: `docs/MCP_TOOLS.md`.
 
+**Postgres durable store (Phase 2.1, opt-in):**
+- Config: `postgres.enabled=false` default. Set `POSTGRES_DSN` in `.env`
+  and `postgres.enabled=true` in `config.json` to activate.
+- Engine: `core/db.py` (sync SQLAlchemy 2.0 + `psycopg[binary,pool]`
+  3.x). `is_enabled()` is the gate every callsite checks.
+- Schema: `alembic/versions/0001_initial_schema.py` — 5 tables
+  (`campaigns`, `runs`, `llm_calls`, `evidence_bundles`,
+  `model_stats_daily`). All PKs are TEXT to match UUID-shaped JSON IDs.
+  `manifest_sha256/status` and `merkle_root/status` capture Phase 1.5
+  attestation in the schema.
+- Write-through: `core/db_writethrough.py` is the single chokepoint.
+  JSON first, Postgres second; failure logs + Prom counter, never
+  raises. `save_campaigns(data, changed_ids=...)` scopes the upsert
+  to the campaigns the caller actually mutated.
+- Reconcile: `core/db_reconcile.py:reconcile_all` sweeps
+  `memory/run_index.json`, `memory/campaigns.json`,
+  `campaigns/<id>/` (for evidence-bundle metadata via
+  `manifest.json.dsse` sha256), and `memory/model_stats.json` (one
+  `source='reconcile_seed'` row per model). Hooked into `app.py:_lifespan`
+  via `await asyncio.to_thread`.
+- Metrics: `orchestrator_postgres_writethrough_total{table,outcome}`,
+  `orchestrator_postgres_reconcile_rows_total{table}`,
+  `orchestrator_postgres_reconcile_duration_seconds` on `/metrics`.
+
 **Operational hardening (Phase 1.8):**
 - Config validation: `core/config_schema.py` `OrchestratorSettings` —
   Pydantic v2 model loaded by `core/config.py` at import time. Bad
@@ -270,7 +294,30 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     (203 → 246), ruff + mypy --strict clean on all touched files.
 
 ### Phase 2 — durability + observability
-Postgres + Redis + OTel/Tempo/Grafana + budget tracking + SkyPilot + new UI.
+
+2.1 Postgres for durable state — DONE (v0.2.1-phase2.1, 2026-05-07,
+    PR #11 merge `c8375c1`). Postgres in its own LXC as a **secondary**
+    durable store; JSON files under `memory/`/`runs/`/`campaigns/`
+    remain canonical. 5 tables (`campaigns`, `runs`, `llm_calls`,
+    `evidence_bundles`, `model_stats_daily`) under Alembic. Sync
+    SQLAlchemy 2.0 + `psycopg[binary,pool]` 3.x. Dual-write chokepoint
+    at `core/db_writethrough.py` — JSON-first, Postgres-second, log+swallow
+    on failure (never raises out of Prefect `@task` bodies). Wired into
+    `_persist_run_index`, `save_campaigns` (with `changed_ids` scoping),
+    `state_hooks.on_task_completion`, `build_bundle`, and
+    `update_model_stats`. Reconcile-on-startup at `core/db_reconcile.py`
+    sweeps the 4 canonical JSON files plus `campaigns/<id>/` RO-Crate
+    dirs. Three Prom instruments on `/metrics`:
+    `orchestrator_postgres_writethrough_total{table,outcome}`,
+    `orchestrator_postgres_reconcile_rows_total{table}`,
+    `orchestrator_postgres_reconcile_duration_seconds`. Ships dormant —
+    `postgres.enabled=false` default; operator action:
+    `scripts/install_postgres.sh` → `alembic upgrade head` → flip flag.
+2.2 Redis for ephemeral state — pending.
+2.3 OpenTelemetry — pending.
+2.4 Budget tracking — pending.
+2.5 SkyPilot for cloud-burst GPU — pending.
+2.6 New UI — pending.
 
 ### Phase 3 — advanced
 HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
@@ -314,7 +361,14 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-07, Phase 1.8 (operational hardening) shipped:
+*Last updated: 2026-05-07, Phase 2.1 (Postgres durable state) shipped
+in PR #11 (merge `c8375c1`, tag `v0.2.1-phase2.1`): 13 atomic commits,
++77 tests (247 → 324), ruff + mypy --strict clean on every Phase 2.1
+source module. JSON remains canonical; Postgres is the queryable
+mirror that unblocks Phase 2.4 budget aggregates and Phase 2.6 UI. Ships
+dormant; operator stands up the LXC and flips `postgres.enabled=true`.
+
+Phase 1.8 (operational hardening, prior release) shipped:
 config validation (Pydantic), URL cache single-flight, subprocess
 `TimeoutExpired` handling, log rotation, Prometheus `/metrics`. 6
 atomic commits on `feat/phase1.8-ops-hardening`, +43 tests (203 → 246),

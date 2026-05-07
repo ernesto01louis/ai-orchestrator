@@ -259,12 +259,16 @@ clean on all touched files.
 
 ## Phase 2 — Durability and observability (~8 weeks)
 
-### 2.1 Postgres for durable state
-- [ ] Postgres in its own LXC (independent backups)
-- [ ] Schema: campaigns, runs, evidence_bundles, model_stats_daily
-- [ ] Alembic for migrations
-- [ ] Write-through: JSON file + Postgres row
-- [ ] Reconcile on startup
+### 2.1 Postgres for durable state — **DONE** (v0.2.1-phase2.1, 2026-05-07)
+- [x] Postgres in its own LXC (independent backups) — `scripts/install_postgres.sh` + RUNBOOK § "Postgres durable store"
+- [x] Schema: campaigns, runs, evidence_bundles, model_stats_daily (+ `llm_calls` child table for Phase 2.4 budget queries) — `alembic/versions/0001_initial_schema.py`
+- [x] Alembic for migrations — `alembic/env.py` reads DSN directly from .env (no FastAPI tree pulled at migration time)
+- [x] Write-through: JSON file + Postgres row — `core/db_writethrough.py`, JSON-canonical, swallow-and-continue on Postgres failure
+- [x] Reconcile on startup — `core/db_reconcile.py`, hooked into `app.py` lifespan via `asyncio.to_thread`
+- [x] Prometheus metrics for write-through + reconcile (`orchestrator_postgres_writethrough_total{table,outcome}`, `orchestrator_postgres_reconcile_rows_total{table}`, `orchestrator_postgres_reconcile_duration_seconds`)
+- [x] `postgres-integration` CI job (postgres:16-alpine service container, `alembic upgrade head`, `pytest -m postgres_real`)
+
+Ships dormant — `postgres.enabled=false` default. Operator action: stand up new LXC, `alembic upgrade head`, flip the flag.
 
 ### 2.2 Redis for ephemeral state
 - [ ] Redis in a new LXC
