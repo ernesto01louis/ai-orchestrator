@@ -125,5 +125,12 @@
     "run_status_ttl": 86400,
     "url_cache_ttl": 60,
     "embed_cache_ttl": 604800
+  },
+  "otel": {
+    "_comment": "Phase 2.3 OpenTelemetry tracing. Set enabled=true after install_tempo.sh and point endpoint at the Tempo OTLP/gRPC port (4317). OTEL_ENDPOINT in .env overrides this.",
+    "enabled": false,
+    "endpoint": "",
+    "service_name": "ai-orchestrator",
+    "sample_ratio": 1.0
   }
 }

@@ -51,7 +51,27 @@ pluggy==1.6.0
 postgrest==2.28.3
 prompt_toolkit==3.0.52
 propcache==0.4.1
-protobuf==7.34.1
+protobuf==6.33.6
+
+# Phase 2.3 OpenTelemetry — tracing SDK + OTLP/gRPC exporter +
+# auto-instrumentation for FastAPI and the requests library.
+# All beta-channel (0.62b1) packages are pinned together; bump as a
+# group when upgrading. Loads dormant — see core/otel.py:init_tracing.
+opentelemetry-api==1.41.1
+opentelemetry-sdk==1.41.1
+opentelemetry-exporter-otlp-proto-common==1.41.1
+opentelemetry-exporter-otlp-proto-grpc==1.41.1
+opentelemetry-instrumentation==0.62b1
+opentelemetry-instrumentation-asgi==0.62b1
+opentelemetry-instrumentation-fastapi==0.62b1
+opentelemetry-instrumentation-requests==0.62b1
+opentelemetry-proto==1.41.1
+opentelemetry-semantic-conventions==0.62b1
+opentelemetry-util-http==0.62b1
+grpcio==1.80.0
+asgiref==3.11.1
+googleapis-common-protos==1.75.0
+wrapt==2.1.2
 pycparser==3.0
 pydantic-settings==2.13.1
 pydantic==2.12.5

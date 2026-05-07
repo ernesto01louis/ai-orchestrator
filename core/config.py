@@ -149,3 +149,10 @@ REDIS_SOCKET_TIMEOUT = _settings.redis.socket_timeout
 REDIS_RUN_STATUS_TTL = _settings.redis.run_status_ttl
 REDIS_URL_CACHE_TTL = _settings.redis.url_cache_ttl
 REDIS_EMBED_CACHE_TTL = _settings.redis.embed_cache_ttl
+
+# Phase 2.3 OpenTelemetry tracing. OTEL_ENDPOINT env var wins over the
+# config.json value (mirrors POSTGRES_DSN / REDIS_URL pattern).
+OTEL_ENABLED = _settings.otel.enabled
+OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "") or _settings.otel.endpoint
+OTEL_SERVICE_NAME = _settings.otel.service_name
+OTEL_SAMPLE_RATIO = _settings.otel.sample_ratio
