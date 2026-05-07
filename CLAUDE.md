@@ -190,6 +190,29 @@ description from a vision model when available.
   introspects FastMCP at call time.
 - Human docs: `docs/MCP_TOOLS.md`.
 
+**Operational hardening (Phase 1.8):**
+- Config validation: `core/config_schema.py` `OrchestratorSettings` —
+  Pydantic v2 model loaded by `core/config.py` at import time. Bad
+  config fails fast with `SystemExit("[core.config] Invalid config in
+  <path>: …")` instead of `KeyError` deep in a request path.
+- URL cache single-flight: `llm/ollama._refresh_url_cache` is wrapped
+  in a `threading.Lock` with double-checked locking. N concurrent
+  callers fan down to one `/api/tags` HTTP roundtrip per TTL window.
+- Subprocess timeouts: all 14 production subprocess calls already
+  passed `timeout=`. The audit fixed three places that propagated
+  `TimeoutExpired` uncaught (`execution.verify_local`,
+  `execution.deploy_file`, `tools.run_command` — last tightened from
+  `except Exception` to `except (SubprocessError, OSError)`).
+- Log rotation: `core/log_rotation.py` `rotate_logs()` (gzip > 1d,
+  delete `.log.gz` > 90d). Daemon thread in `app.py` lifespan +
+  `orchestrator rotate-logs` CLI subcommand with `--dry-run`.
+- Prometheus metrics at `/metrics` (auth-bypassed): four instruments
+  in `core/metrics.py` — Counter `orchestrator_runs_total{status}`,
+  Histogram `orchestrator_agent_task_seconds{role,model}`, Counter
+  `orchestrator_llm_calls_total{role,model,outcome}`, Gauge
+  `orchestrator_active_runs`. **No `run_id` label** (cardinality
+  discipline; Grafana correlates by run_id via logs/traces, not labels).
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase task list.
@@ -239,8 +262,12 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     `requires_target`), bearer-token auth via `core/auth.py` honoring the
     Phase 1.6 client SDK's `BearerTokenAuth` shape unchanged. External
     MCP smoke test in `tests/test_mcp_external_client.py`.
-1.8 Op fixes (URL cache single-flight, log rotation, config validation,
-    Prometheus metrics)
+1.8 Op fixes — DONE (v0.1.8-phase1.8, 2026-05-07): config validation
+    (Pydantic), URL cache single-flight (threading.Lock + double-check),
+    subprocess `TimeoutExpired` handling at 3 callsites, log rotation
+    (gzip > 1d / delete > 90d, daemon thread + CLI), Prometheus metrics
+    at `/metrics` (auth-bypassed). 6 atomic commits, +43 tests
+    (203 → 246), ruff + mypy --strict clean on all touched files.
 
 ### Phase 2 — durability + observability
 Postgres + Redis + OTel/Tempo/Grafana + budget tracking + SkyPilot + new UI.
@@ -287,10 +314,12 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-07, Phase 1.7 (MCP contract hardening) shipped:
-bearer-token auth, contract version `1.0.0`, `orchestrator://contract`
-resource, per-tool annotations + meta, `docs/MCP_TOOLS.md`. Phase 1.6
-client SDK (`ai-orchestrator-client` `0.1.0a0`) on PyPI; SDK's
-`BearerTokenAuth` honored by 1.7 server with no SDK release needed.
-When you complete a phase or significantly change architecture, update
-this file before starting the next work item.*
+*Last updated: 2026-05-07, Phase 1.8 (operational hardening) shipped:
+config validation (Pydantic), URL cache single-flight, subprocess
+`TimeoutExpired` handling, log rotation, Prometheus `/metrics`. 6
+atomic commits on `feat/phase1.8-ops-hardening`, +43 tests (203 → 246),
+ruff + mypy --strict clean on all touched files. Bearer-token auth
+from Phase 1.7 still gates everything except `/health`, `/metrics`,
+`/openapi.json`, `/docs`, `/redoc`. When you complete a phase or
+significantly change architecture, update this file before starting
+the next work item.*
