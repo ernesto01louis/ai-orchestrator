@@ -309,6 +309,29 @@ description from a vision model when available.
 - Metrics: ``orchestrator_budget_threshold_total{threshold,state}``
   on ``/metrics``.
 
+**SkyPilot cloud-burst (Phase 2.5, opt-in):**
+- Config: ``sky.enabled=false`` default. Set ``RUNPOD_API_KEY`` /
+  ``vastai`` creds and flip the flag.
+- Wrapper: ``core/sky.py`` lazy-imports the SDK; ``is_enabled()`` is
+  a 3-condition gate (config + SDK importable + ``yaml_dir`` exists).
+  ``BurstRequest`` / ``BurstHandle`` dataclasses, ``launch_burst`` /
+  ``stop_burst`` / ``status_burst`` / ``list_active_bursts`` /
+  ``cost_report_for_cluster``. Per-burst USD ceiling
+  (``sky.max_burst_cost_usd``) rejected at launch.
+- YAML specs: ``sky/llm-burst.yaml`` (Ollama on GPU, long-running) +
+  ``sky/torch-eval.yaml`` (PyTorch one-shot). Add new specs by
+  basename and they're available to the burst route.
+- Routes: ``POST /runs/{id}/burst`` launches, ``GET /runs/{id}/bursts``
+  lists active, ``POST /runs/{id}/bursts/{cluster}/stop`` stops AND
+  accrues actual cost to the campaign budget via Phase 2.4
+  ``core.budget.accrue_to_campaign``.
+- Idle-stop daemon: ``start_idle_stop_daemon`` (called from
+  ``app.py:_lifespan``) polls every 60s. Stops clusters past
+  ``sky.idle_timeout_minutes`` of no activity. ``timeout=0``
+  disables.
+- Three-tier cost discipline: per-burst ceiling at launch +
+  per-campaign budget at accrual + idle-stop failsafe.
+
 **Operational hardening (Phase 1.8):**
 - Config validation: `core/config_schema.py` `OrchestratorSettings` —
   Pydantic v2 model loaded by `core/config.py` at import time. Bad
@@ -460,7 +483,26 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     threshold), thresholds ``[50, 80, 100]``. Operators raise rates
     per-model when their consumer projects route through paid
     providers.
-2.5 SkyPilot for cloud-burst GPU — pending.
+2.5 SkyPilot for cloud-burst GPU — DONE (v0.2.5-phase2.5,
+    2026-05-07, dormant ship). Four atomic commits across
+    `feat/phase2.5-skypilot`:
+    (2.5.1) ``BurstConfig`` schema + ``core.sky`` lazy-importing
+    wrapper with ``BurstRequest`` / ``BurstHandle`` dataclasses,
+    ``launch_burst`` / ``stop_burst`` / ``status_burst`` /
+    ``list_active_bursts``, ``SkyDisabledError``. Per-burst USD ceiling
+    enforced at launch. ``skypilot[runpod,vast]>=0.12,<0.13``
+    pinned in requirements.
+    (2.5.2) ``sky/llm-burst.yaml`` + ``sky/torch-eval.yaml`` starter
+    specs + RUNBOOK section.
+    (2.5.3) ``POST /runs/{id}/burst`` + companion list / stop routes.
+    Stop accrues actual cost to the parent campaign via Phase 2.4
+    ``core.budget.accrue_to_campaign``.
+    (2.5.4) idle-stop daemon polls every minute and stops clusters
+    past ``sky.idle_timeout_minutes``; ``timeout=0`` disables.
+    Wired into ``app.py:_lifespan`` after the OTel init.
+    +73 net new tests (404 → 479). Ships dormant
+    (``sky.enabled=false``); operators configure provider creds
+    (e.g. ``RUNPOD_API_KEY``), run ``sky check``, flip the flag.
 2.6 New UI — pending.
 
 ### Phase 3 — advanced
@@ -505,7 +547,20 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-07, Phase 2.4 (Budget tracking) shipped on
+*Last updated: 2026-05-07, Phase 2.5 (SkyPilot cloud-burst) shipped
+on `feat/phase2.5-skypilot`, tag `v0.2.5-phase2.5`. Four atomic
+commits (2.5.1 ``core.sky`` lazy-import wrapper + ``BurstConfig``
++ ``skypilot[runpod,vast]`` pin; 2.5.2 ``sky/llm-burst.yaml`` +
+``sky/torch-eval.yaml`` + RUNBOOK; 2.5.3 ``POST /runs/{id}/burst``
++ companion list / stop routes with Phase 2.4 budget accrual; 2.5.4
+idle-stop daemon polling every 60s) plus docs. +75 net new tests
+(404 → 479). Ships **dormant** by operator's choice: `sky.enabled=false`
+default, no live cloud account configured. Operator action when
+ready: configure provider creds (e.g. `RUNPOD_API_KEY`), run
+`sky check`, flip the flag, restart. Three-tier cost discipline
+(per-burst ceiling + per-campaign budget + idle-stop failsafe).
+
+Phase 2.4 (Budget tracking, prior release) shipped on
 `feat/phase2.4-budget`, tag `v0.2.4-phase2.4`. Five atomic commits
 (2.4.1 BudgetConfig + cost calculator + alembic 0002; 2.4.2-3
 state-hook accrual + threshold transitions + auto-pause on 100%
