@@ -234,7 +234,7 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     `/opt/ai-orchestrator-client/RELEASING.md`).
 1.7 MCP contract hardening — DONE (v0.1.7-phase1.7, shipped 2026-05-07):
     contract version `1.0.0` exposed at `orchestrator://contract`,
-    `docs/MCP_TOOLS.md` documents all 9 tools / 11 resources / 3 prompts,
+    `docs/MCP_TOOLS.md` documents all 9 tools / 10 resources / 1 resource template / 3 prompts,
     per-tool `ToolAnnotations` + freeform `meta` (`category`,
     `requires_target`), bearer-token auth via `core/auth.py` honoring the
     Phase 1.6 client SDK's `BearerTokenAuth` shape unchanged. External

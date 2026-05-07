@@ -79,10 +79,8 @@ class BearerTokenAuthMiddleware:
     def _extract_token(scope: Scope) -> str | None:
         for key, value in scope.get("headers", []):
             if key == b"authorization":
-                try:
-                    decoded = value.decode("latin-1")
-                except UnicodeDecodeError:
-                    return None
+                # latin-1 covers all 256 byte values — decode cannot raise.
+                decoded = value.decode("latin-1")
                 parts = decoded.split(None, 1)
                 if len(parts) != 2:
                     return None

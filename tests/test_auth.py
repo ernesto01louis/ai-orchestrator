@@ -154,16 +154,19 @@ def test_default_public_paths_contains_expected() -> None:
 
 
 def test_real_app_health_reachable_without_auth(
-    monkeypatch: pytest.MonkeyPatch,
     inprocess_client: TestClient,
 ) -> None:
-    """Wire-up smoke: the real orchestrator app keeps /health reachable when
-    ORCHESTRATOR_API_TOKEN is unset (default for the test suite).
+    """Wire-up smoke: with no ORCHESTRATOR_API_TOKEN set at app startup,
+    /health remains reachable on the real orchestrator app.
+
+    The middleware is configured once at app.py import time via
+    load_token_from_env() — this test asserts the default behavior, not
+    runtime env reactivity. To test the token-set path, instantiate the
+    middleware directly (see other tests in this file).
 
     Uses the session-scoped ``inprocess_client`` fixture from conftest so we
     don't create a second TestClient over the same MCP singleton (which raises
     RuntimeError on the second lifespan start).
     """
-    monkeypatch.delenv(ENV_VAR, raising=False)
     resp = inprocess_client.get("/health")
     assert resp.status_code == 200

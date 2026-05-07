@@ -77,6 +77,15 @@ from prefect_io import _healthcheck
 
 app = FastAPI()
 
+# Middleware ordering note (Starlette is LIFO — last-added is outermost):
+# Auth is added FIRST so it ends up INNER; CORS is added SECOND so it ends
+# up OUTER. Request flow: CORS → Auth → routes. This ensures Auth's 401
+# responses pass back through CORS and gain Access-Control-Allow-Origin
+# headers before reaching the browser.
+
+# Bearer-token auth (Phase 1.7). No-op when ORCHESTRATOR_API_TOKEN is unset.
+app.add_middleware(BearerTokenAuthMiddleware, token=load_token_from_env())
+
 # CORS — allow the graph UI and external tools to access the API
 app.add_middleware(
     CORSMiddleware,
@@ -84,9 +93,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Bearer-token auth (Phase 1.7). No-op when ORCHESTRATOR_API_TOKEN is unset.
-app.add_middleware(BearerTokenAuthMiddleware, token=load_token_from_env())
 
 # MCP server: mount with proper lifecycle management
 from mcp_server import mcp as mcp_instance

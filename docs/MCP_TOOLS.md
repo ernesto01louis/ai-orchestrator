@@ -27,10 +27,10 @@ Bump the constant in `mcp_server.py` in the same commit as the change.
 ## Discovery
 
 ```python
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp import ClientSession
 
-async with streamablehttp_client("http://orchestrator:8000/mcp/") as (read, write, _):
+async with streamable_http_client("http://orchestrator:8000/mcp/mcp") as (read, write, _):
     async with ClientSession(read, write) as session:
         await session.initialize()
         tools = await session.list_tools()

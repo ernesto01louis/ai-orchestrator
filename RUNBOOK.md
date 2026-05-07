@@ -188,8 +188,12 @@ async with websockets.connect(
     ...
 ```
 
-Failed WebSocket auth is rejected with close code `4401` before the
-handshake completes (per Phase 1.7 design).
+Failed WebSocket auth is rejected during the upgrade handshake. The
+server sends a pre-accept ``websocket.close`` which uvicorn translates
+to HTTP 403 on the upgrade response, so the websockets-13 client raises
+``InvalidStatusCode(403)``. (Internal close code 4401 is set by the
+middleware but is dropped by the WS-to-HTTP rejection translation —
+clients see the 403, not the 4401.)
 
 The MCP endpoint at `/mcp` is covered by the same middleware. External
 MCP clients pass the header on the streamable HTTP connection — see

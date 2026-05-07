@@ -401,6 +401,9 @@ def _serialize_annotations(ann: ToolAnnotations | None) -> dict[str, object]:
 def resource_contract() -> str:
     """Machine-readable MCP contract: version + enumerated tools, resources,
     templates, and prompts. Drift-free — introspects FastMCP at call time."""
+    # FastMCP's public list_tools / list_resources / list_prompts are async;
+    # this resource handler is sync, so we read from the private managers
+    # which expose synchronous accessors. Pinned at mcp==1.27.0.
     tools = [
         {
             "name": t.name,
