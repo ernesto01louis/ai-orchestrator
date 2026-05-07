@@ -166,7 +166,7 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       so `prefect.api_url` can move from LAN IP to tailnet — script staged at
       `root@192.168.2.13:/root/install_ts_lxc200.sh`
 
-### 1.4 DVC on TrueNAS — IN PROGRESS (branch `feat/dvc-truenas`)
+### 1.4 DVC on TrueNAS — DONE (v0.1.4-phase1.4, shipped 2026-05-06)
 - [x] `pip install dvc[ssh]` — pinned `dvc[ssh]>=3.67,<4` in `requirements.txt`
 - [x] `dvc init` + `.dvcignore` (excludes venv/, caches, vault/, secrets)
 - [x] Default remote: `ssh://dvc-orchestrator@192.168.2.222/mnt/f3/orchestrator-dvc`
