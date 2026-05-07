@@ -132,6 +132,75 @@ If the verify route returns errors, the bundle has been tampered with
 curl -sX POST http://127.0.0.1:8000/campaigns/<id>/evidence/refresh
 ```
 
+## Bearer-token authentication (Phase 1.7)
+
+Disabled by default. To turn it on, set the env var
+`ORCHESTRATOR_API_TOKEN` in `.env` to a high-entropy value:
+
+```bash
+echo "ORCHESTRATOR_API_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> /opt/ai-orchestrator/.env
+systemctl restart ai-orchestrator
+```
+
+When the env var is **unset or empty**, the middleware is a no-op and
+every request is allowed (backward-compatible with pre-1.7 deployments).
+
+When set, every HTTP and WebSocket request must carry
+`Authorization: Bearer <token>` except:
+
+- `GET /health` — for liveness probes
+- `GET /openapi.json`, `GET /docs`, `GET /redoc`, `GET /docs/oauth2-redirect`
+- HTTP `OPTIONS` requests (CORS preflight)
+
+Verify:
+
+```bash
+TOKEN="<your-token>"
+
+# Without header → 401
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/control/status
+# 401
+
+# With header → 200
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8000/control/status
+```
+
+Python client SDK (Phase 1.6) — auth shape is forward-compatible:
+
+```python
+from ai_orchestrator_client import OrchestratorClient, BearerTokenAuth
+
+client = OrchestratorClient(
+    base_url="http://orchestrator:8000",
+    auth=BearerTokenAuth(token=os.environ["ORCHESTRATOR_API_TOKEN"]),
+)
+```
+
+WebSocket clients pass the header during the handshake:
+
+```python
+import websockets
+async with websockets.connect(
+    "ws://orchestrator:8000/ws",
+    additional_headers={"Authorization": f"Bearer {token}"},
+) as ws:
+    ...
+```
+
+Failed WebSocket auth is rejected with close code `4401` before the
+handshake completes (per Phase 1.7 design).
+
+The MCP endpoint at `/mcp` is covered by the same middleware. External
+MCP clients pass the header on the streamable HTTP connection — see
+`docs/MCP_TOOLS.md` for the discovery contract.
+
+### Token rotation
+
+Generate a new token, restart the service, update consumers. There's no
+in-process rotation hook yet; if that becomes painful, see Phase 2.x in
+`ROADMAP.md`.
+
 ## Run the test suite
 
 ```bash

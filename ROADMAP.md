@@ -209,12 +209,25 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       on PyPI, push GitHub remote, push `v0.1.0a0` tag (see
       `/opt/ai-orchestrator-client/RELEASING.md`)
 
-### 1.7 MCP contract hardening
-- [ ] Document all MCP tools at `/mcp`
-- [ ] Version the MCP contract; bump major on breaking changes
-- [ ] Add API-token auth
-- [ ] Per-tool metadata
-- [ ] Test: external MCP client can discover and call tools
+### 1.7 MCP contract hardening — DONE (v0.1.7-phase1.7, shipped 2026-05-07)
+- [x] Document all MCP tools at `/mcp` — see [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)
+- [x] Version the MCP contract; bump major on breaking changes
+      — `mcp_server.MCP_CONTRACT_VERSION = "1.0.0"` plus
+      `orchestrator://contract` resource introspecting FastMCP at call time
+- [x] Add API-token auth — bearer-token ASGI middleware
+      (`core/auth.py`); honors `ORCHESTRATOR_API_TOKEN` env var, no-op
+      when unset, covers REST + `/mcp` + `/ws` uniformly. Honors the
+      Phase 1.6 client SDK's `BearerTokenAuth` shape unchanged.
+- [x] Per-tool metadata — `ToolAnnotations` (read/destructive/idempotent/openWorld)
+      plus orchestrator-specific `meta` (`category`, `requires_target`)
+      on all 9 tools.
+- [x] Test: external MCP client can discover and call tools —
+      `tests/test_mcp_external_client.py` drives an `mcp.ClientSession`
+      against a uvicorn subprocess and round-trips list_tools /
+      list_resources / read_resource / call_tool / list_prompts.
+
+29 new tests (auth: 17, contract: 11, external: 8 — minus 7 reused).
+Net suite size: 203 passed, 3 deselected (was 156 at end of Phase 1.5).
 
 ### 1.8 Operational improvements
 - [ ] Single-flight lock on `_refresh_url_cache`
