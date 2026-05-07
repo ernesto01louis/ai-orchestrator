@@ -524,21 +524,22 @@ reconcile-on-startup heals any gap. Toggleable via the
 
 1. On Proxmox: create a fresh Debian 12 LXC. Suggested ID 202, 1 vCPU,
    2 GB RAM, 20 GB disk. Bridge `vmbr0`. Static IP on the LAN
-   (e.g. `192.168.2.183`).
-2. Generate a password for the `orchestrator` role:
-   ```bash
-   openssl rand -base64 24
-   ```
-3. From the Proxmox host, copy the script in and run it:
+   (e.g. `192.168.2.184`).
+2. From the Proxmox host, copy the script in and run it:
    ```bash
    pct push 202 /opt/ai-orchestrator/scripts/install_postgres.sh /root/install_postgres.sh
    pct enter 202
-   POSTGRES_ORCHESTRATOR_PASSWORD='<paste-password>' \
-       bash /root/install_postgres.sh
+   bash /root/install_postgres.sh
    ```
-   The script installs postgresql-16, creates the `orchestrator` role
-   and database, sets `listen_addresses='*'`, scopes `pg_hba.conf` to
-   the LAN + Tailscale CGNAT, and installs the daily `pg_dump` cron.
+   The script installs `sudo` + `locales-all` + postgresql-16 + contrib,
+   generates a URL-safe alphanumeric password (printed at the end —
+   save it then), creates the `orchestrator` role + database from
+   `template0` with explicit UTF-8 encoding, sets `listen_addresses='*'`,
+   scopes `pg_hba.conf` to the LAN + Tailscale CGNAT, and installs the
+   daily `pg_dump` cron. **Pre-set** `POSTGRES_ORCHESTRATOR_PASSWORD`
+   in the environment if you want to choose the password yourself
+   (must be URL-safe — no `/+=@:?#%&` — to interpolate into POSTGRES_DSN
+   without encoding pitfalls).
 4. From orchestrator LXC 200, smoke-test connectivity:
    ```bash
    apt-get install -y postgresql-client
