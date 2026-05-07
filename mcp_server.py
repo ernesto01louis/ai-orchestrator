@@ -12,10 +12,17 @@ Transport: Streamable HTTP (mounted as ASGI sub-app)
 """
 
 import json
-import uuid
 import threading
+import uuid
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+# Phase 1.7 — MCP contract version. Bump MAJOR on breaking changes
+# (tool/resource/prompt rename or removed; arg-shape break). Bump MINOR on
+# additive changes (new tool/resource, new optional arg). Bump PATCH on
+# doc/description-only edits.
+MCP_CONTRACT_VERSION = "1.0.0"
 
 
 # Create MCP server instance
@@ -44,7 +51,13 @@ def _app():
 # TOOLS: Actions that modify state or trigger work
 # ------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=False, openWorldHint=True,
+    ),
+    meta={"category": "orchestration", "requires_target": True},
+)
 def orchestrate(
     project_name: str,
     prompt: str,
@@ -103,7 +116,13 @@ def orchestrate(
     }
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=False,
+    ),
+    meta={"category": "orchestration", "requires_target": False},
+)
 def get_run_status(run_id: str) -> dict:
     """Check the status of an orchestration run.
 
@@ -118,7 +137,13 @@ def get_run_status(run_id: str) -> dict:
     return {k: v for k, v in status.items() if not k.startswith("_")}
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=False,
+    ),
+    meta={"category": "orchestration", "requires_target": False},
+)
 def get_run_result(run_id: str) -> dict:
     """Get the final result of a completed orchestration run, including generated files and scores.
 
@@ -136,7 +161,13 @@ def get_run_result(run_id: str) -> dict:
     return status.get("result", {})
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=False,
+    ),
+    meta={"category": "ops", "requires_target": False},
+)
 def list_targets() -> dict:
     """List all available deploy targets (Raspberry Pi devices) with their SSH details."""
     a = _app()
@@ -150,7 +181,13 @@ def list_targets() -> dict:
     return {"targets": targets}
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True,
+    ),
+    meta={"category": "ops", "requires_target": False},
+)
 def list_models() -> dict:
     """List all Ollama models currently available across all LXC containers."""
     a = _app()
@@ -161,7 +198,13 @@ def list_models() -> dict:
     return {"models": models}
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=False, openWorldHint=False,
+    ),
+    meta={"category": "memory", "requires_target": False},
+)
 def run_dream_cycle() -> dict:
     """Trigger a Dream memory consolidation cycle. Cleans, deduplicates, and
     optimizes the orchestrator's memory layers. Returns a health report."""
@@ -171,7 +214,13 @@ def run_dream_cycle() -> dict:
     return run_dream(available_models=available, log_fn=a.log)
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=False, openWorldHint=False,
+    ),
+    meta={"category": "ops", "requires_target": False},
+)
 def add_safety_gate(pattern: str, reason: str, severity: str = "block") -> dict:
     """Add a manual safety gate rule that blocks or warns on matching commands.
 
@@ -185,7 +234,13 @@ def add_safety_gate(pattern: str, reason: str, severity: str = "block") -> dict:
     return gate
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=True, openWorldHint=False,
+    ),
+    meta={"category": "agent_config", "requires_target": False},
+)
 def reload_agents() -> dict:
     """Reload all agent configurations from the agents/ folder.
     Use after editing prompt templates or agent.yaml files."""
@@ -194,7 +249,13 @@ def reload_agents() -> dict:
     return {"reloaded": list(agents.keys())}
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=True, openWorldHint=False,
+    ),
+    meta={"category": "agent_config", "requires_target": False},
+)
 def update_agent_prompt(role: str, prompt_type: str, content: str) -> dict:
     """Update a prompt template for an agent role. Changes take effect on next run.
 
@@ -204,6 +265,7 @@ def update_agent_prompt(role: str, prompt_type: str, content: str) -> dict:
         content: New prompt template content (supports {{variable}} placeholders)
     """
     import os
+
     from agents.loader import load_agent
 
     valid_types = {"system_prompt", "user_prompt", "user_prompt_multi"}
@@ -321,6 +383,71 @@ def resource_dream_log() -> str:
     """History of dream consolidation cycles with health scores."""
     from dream import DREAM_LOG, _load_json
     return json.dumps(_load_json(DREAM_LOG, []), indent=2)
+
+
+def _serialize_annotations(ann: ToolAnnotations | None) -> dict[str, object]:
+    """Pull MCP ToolAnnotations into a plain JSON-friendly dict."""
+    if ann is None:
+        return {}
+    return {
+        "readOnlyHint": ann.readOnlyHint,
+        "destructiveHint": ann.destructiveHint,
+        "idempotentHint": ann.idempotentHint,
+        "openWorldHint": ann.openWorldHint,
+    }
+
+
+@mcp.resource("orchestrator://contract")
+def resource_contract() -> str:
+    """Machine-readable MCP contract: version + enumerated tools, resources,
+    templates, and prompts. Drift-free — introspects FastMCP at call time."""
+    # FastMCP's public list_tools / list_resources / list_prompts are async;
+    # this resource handler is sync, so we read from the private managers
+    # which expose synchronous accessors. Pinned at mcp==1.27.0.
+    tools = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "annotations": _serialize_annotations(t.annotations),
+            "meta": t.meta or {},
+        }
+        for t in mcp._tool_manager.list_tools()
+    ]
+    resources = [
+        {"uri": str(r.uri), "name": r.name, "description": r.description}
+        for r in mcp._resource_manager.list_resources()
+    ]
+    templates = [
+        {
+            "uri_template": t.uri_template,
+            "name": t.name,
+            "description": t.description,
+        }
+        for t in mcp._resource_manager.list_templates()
+    ]
+    prompts = [
+        {
+            "name": p.name,
+            "description": p.description,
+            "arguments": [
+                {"name": a.name, "required": a.required}
+                for a in (p.arguments or [])
+            ],
+        }
+        for p in mcp._prompt_manager.list_prompts()
+    ]
+    return json.dumps(
+        {
+            "version": MCP_CONTRACT_VERSION,
+            "name": "AI Orchestrator",
+            "tools": tools,
+            "resources": resources,
+            "templates": templates,
+            "prompts": prompts,
+        },
+        indent=2,
+        sort_keys=False,
+    )
 
 
 # ------------------------------------------------

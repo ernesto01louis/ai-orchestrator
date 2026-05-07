@@ -64,6 +64,7 @@ from core.runtime import (
     _update_run_status, _init_run_status,
     _load_run_index, _persist_run_index,
 )
+from core.auth import BearerTokenAuthMiddleware, load_token_from_env
 
 from agents.loader import load_agent, load_all_agents, reload_all as reload_agents, list_roles as list_agent_roles
 from dream import run_dream, DREAM_LOG, _load_json as dream_load_json
@@ -75,6 +76,15 @@ from gates import (
 from prefect_io import _healthcheck
 
 app = FastAPI()
+
+# Middleware ordering note (Starlette is LIFO — last-added is outermost):
+# Auth is added FIRST so it ends up INNER; CORS is added SECOND so it ends
+# up OUTER. Request flow: CORS → Auth → routes. This ensures Auth's 401
+# responses pass back through CORS and gain Access-Control-Allow-Origin
+# headers before reaching the browser.
+
+# Bearer-token auth (Phase 1.7). No-op when ORCHESTRATOR_API_TOKEN is unset.
+app.add_middleware(BearerTokenAuthMiddleware, token=load_token_from_env())
 
 # CORS — allow the graph UI and external tools to access the API
 app.add_middleware(

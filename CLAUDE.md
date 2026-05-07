@@ -179,6 +179,17 @@ description from a vision model when available.
 - CLI: `orchestrator verify-run <run_id>` / `verify-campaign <campaign_id>`
 - Reuses `evidence.signing.sha256_file` (no duplication)
 
+**MCP contract hardening (Phase 1.7):**
+- Bearer-token auth via `core/auth.py` (RFC 6750). Set
+  `ORCHESTRATOR_API_TOKEN` to enable; covers REST + `/mcp` + `/ws`.
+- `mcp_server.MCP_CONTRACT_VERSION = "1.0.0"`. Bump MAJOR on breaking
+  changes, MINOR on additions, PATCH on doc-only.
+- `orchestrator://contract` resource: machine-readable enumeration of
+  tools / resources / templates / prompts, with `ToolAnnotations` and
+  per-tool `meta` (`category`, `requires_target`). Drift-free —
+  introspects FastMCP at call time.
+- Human docs: `docs/MCP_TOOLS.md`.
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase task list.
@@ -212,8 +223,22 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
 1.5 SHA256 artifact manifests — DONE (v0.1.5-phase1.5): per-run SHA256
     manifest.json + per-campaign Merkle merkle.json, lazy verify-on-read,
     `orchestrator` CLI, +46 unit/hook/route/cli tests (167 total).
-1.6 **Python client library** (separate `ai-orchestrator-client` package)
-1.7 MCP contract hardening (version, auth, documented tools)
+1.6 Python client library — DONE in-tree (2026-05-07): separate repo at
+    `/opt/ai-orchestrator-client/`, 22 commits on `main`, `0.1.0a0`
+    version. Sync + async clients with full HTTP surface, `/ws` log
+    streaming, `Campaign.iter_runs(client)` polling generator, typed
+    Pydantic mirrors with OpenAPI drift check, BearerTokenAuth shell.
+    133 tests (ruff + mypy --strict + pytest), GitHub Actions CI matrix,
+    Trusted-Publishing release workflow. PyPI publish pending operator
+    (register publisher + push GitHub remote + push `v0.1.0a0` tag — see
+    `/opt/ai-orchestrator-client/RELEASING.md`).
+1.7 MCP contract hardening — DONE (v0.1.7-phase1.7, shipped 2026-05-07):
+    contract version `1.0.0` exposed at `orchestrator://contract`,
+    `docs/MCP_TOOLS.md` documents all 9 tools / 10 resources / 1 resource template / 3 prompts,
+    per-tool `ToolAnnotations` + freeform `meta` (`category`,
+    `requires_target`), bearer-token auth via `core/auth.py` honoring the
+    Phase 1.6 client SDK's `BearerTokenAuth` shape unchanged. External
+    MCP smoke test in `tests/test_mcp_external_client.py`.
 1.8 Op fixes (URL cache single-flight, log rotation, config validation,
     Prometheus metrics)
 
@@ -262,7 +287,10 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-06, Phase 1.5 shipped (per-run SHA256 manifests +
-campaign Merkle root + verify endpoints + CLI). When you complete a phase
-or significantly change architecture, update this file before starting the
-next work item.*
+*Last updated: 2026-05-07, Phase 1.7 (MCP contract hardening) shipped:
+bearer-token auth, contract version `1.0.0`, `orchestrator://contract`
+resource, per-tool annotations + meta, `docs/MCP_TOOLS.md`. Phase 1.6
+client SDK (`ai-orchestrator-client` `0.1.0a0`) on PyPI; SDK's
+`BearerTokenAuth` honored by 1.7 server with no SDK release needed.
+When you complete a phase or significantly change architecture, update
+this file before starting the next work item.*
