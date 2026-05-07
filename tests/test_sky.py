@@ -241,3 +241,77 @@ def test_resolve_yaml_path_raises_for_missing(
 ) -> None:
     with pytest.raises(FileNotFoundError):
         sky._resolve_yaml_path("nope")
+
+
+# ---------------------------------------------------------------------------
+# BURSTS registry helpers
+# ---------------------------------------------------------------------------
+
+
+def _handle(cluster_name: str = "c-1", cost: float = 1.0) -> sky.BurstHandle:
+    return sky.BurstHandle(
+        cluster_name=cluster_name,
+        spec_name="llm-burst",
+        started_at="2026-05-07T19:00:00",
+        estimated_cost_usd=cost,
+        request=sky.BurstRequest(spec_name="llm-burst", cluster_name=cluster_name),
+    )
+
+
+def test_register_burst_records_entry() -> None:
+    sky.register_burst("r-1", _handle("c-1"))
+    rows = sky.list_registered_bursts()
+    assert len(rows) == 1
+    assert rows[0]["cluster_name"] == "c-1"
+    assert rows[0]["run_id"] == "r-1"
+    assert rows[0]["status"] == "running"
+
+
+def test_unregister_burst_removes_entry() -> None:
+    sky.register_burst("r-1", _handle("c-1"))
+    popped = sky.unregister_burst("c-1")
+    assert popped is not None
+    assert sky.list_registered_bursts() == []
+
+
+def test_unregister_unknown_returns_none() -> None:
+    assert sky.unregister_burst("does-not-exist") is None
+
+
+def test_cost_report_falls_back_to_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the SDK exposes no ``cost_report`` (or returns nothing),
+    we report the registered estimate so callers always get a number."""
+    sky.register_burst("r-1", _handle("c-1", cost=2.5))
+    monkeypatch.setattr(sky, "_try_import_sky", lambda: None)
+    assert sky.cost_report_for_cluster("c-1") == 2.5
+
+
+def test_cost_report_uses_sdk_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sky.register_burst("r-1", _handle("c-1", cost=2.5))
+    fake_sdk = MagicMock()
+    fake_sdk.cost_report.return_value = [{"total_cost": 4.20}]
+    monkeypatch.setattr(sky, "_try_import_sky", lambda: fake_sdk)
+    assert sky.cost_report_for_cluster("c-1") == 4.20
+
+
+def test_cost_report_unknown_cluster_returns_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sky, "_try_import_sky", lambda: None)
+    assert sky.cost_report_for_cluster("never-launched") == 0.0
+
+
+def test_cost_report_swallows_sdk_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A flaky cost_report call must not propagate — the route uses
+    this on the stop path and the cluster is already going down."""
+    sky.register_burst("r-1", _handle("c-1", cost=1.0))
+    fake_sdk = MagicMock()
+    fake_sdk.cost_report.side_effect = RuntimeError("boom")
+    monkeypatch.setattr(sky, "_try_import_sky", lambda: fake_sdk)
+    assert sky.cost_report_for_cluster("c-1") == 1.0

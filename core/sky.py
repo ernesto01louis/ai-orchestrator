@@ -306,3 +306,101 @@ def reset_for_tests() -> None:
     with _init_lock:
         _sky_module = None
         _check_passed = False
+    BURSTS.clear()
+
+
+# ---------------------------------------------------------------------------
+# Active-burst registry — populated by the route, drained by the
+# idle-stop daemon
+# ---------------------------------------------------------------------------
+
+# Keyed by ``cluster_name``. Values: dict with ``handle`` (BurstHandle),
+# ``run_id`` (the orchestrator run that requested the burst), and
+# ``status`` (``running`` / ``stopping`` / ``stopped``). Mutated under
+# ``_burst_lock``.
+BURSTS: dict[str, dict[str, Any]] = {}
+_burst_lock = threading.Lock()
+
+
+def register_burst(run_id: str, handle: BurstHandle) -> None:
+    """Record a successful launch in the in-process registry.
+
+    Called by the burst route after ``launch_burst`` returns. The
+    idle-stop daemon (Phase 2.5.4) reads this registry to know which
+    clusters to monitor.
+    """
+    with _burst_lock:
+        BURSTS[handle.cluster_name] = {
+            "handle": handle,
+            "run_id": run_id,
+            "status": "running",
+        }
+    _logger.info(
+        "sky_burst_registered cluster=%s run_id=%s",
+        handle.cluster_name, run_id,
+    )
+
+
+def unregister_burst(cluster_name: str) -> dict[str, Any] | None:
+    """Remove a burst from the registry. Returns the entry or None.
+
+    Called after a successful ``stop_burst`` so subsequent calls to
+    ``list_registered_bursts`` don't include the dead cluster.
+    """
+    with _burst_lock:
+        return BURSTS.pop(cluster_name, None)
+
+
+def list_registered_bursts() -> list[dict[str, Any]]:
+    """Snapshot of the active-burst registry. Used by the routes to
+    return a list view; daemon iterates ``BURSTS`` directly."""
+    with _burst_lock:
+        return [
+            {
+                "cluster_name": name,
+                "run_id": entry["run_id"],
+                "status": entry["status"],
+                "spec_name": entry["handle"].spec_name,
+                "started_at": entry["handle"].started_at,
+                "estimated_cost_usd": entry["handle"].estimated_cost_usd,
+            }
+            for name, entry in BURSTS.items()
+        ]
+
+
+def cost_report_for_cluster(cluster_name: str) -> float:
+    """Best-effort actual-cost lookup for a cluster.
+
+    Returns the estimated cost when the SDK doesn't surface a
+    real number (and when SkyPilot is dormant). Phase 2.5.4 calls
+    this on cluster termination to accrue the real charge to
+    Phase 2.4 ``budget_used_usd``. Never raises.
+    """
+    fallback = 0.0
+    with _burst_lock:
+        entry = BURSTS.get(cluster_name)
+    if entry is not None:
+        fallback = float(entry["handle"].estimated_cost_usd)
+
+    sky = _try_import_sky()
+    if sky is None:
+        return fallback
+    try:
+        # SkyPilot exposes per-cluster cost via ``sky cost-report --cluster
+        # <name>`` in the CLI. The Python API surface for this
+        # changes between releases; gate on attribute existence so
+        # we degrade gracefully on older SDK versions.
+        report_fn = getattr(sky, "cost_report", None)
+        if report_fn is None:
+            return fallback
+        rows = report_fn([cluster_name])
+        if not rows:
+            return fallback
+        row = rows[0] if isinstance(rows, list) else rows
+        return float(row.get("total_cost", fallback) or fallback)
+    except Exception as exc:
+        _logger.warning(
+            "sky_cost_report_failed cluster=%s error=%s",
+            cluster_name, exc,
+        )
+        return fallback
