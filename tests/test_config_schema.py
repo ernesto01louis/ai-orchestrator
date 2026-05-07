@@ -186,3 +186,46 @@ def test_core_config_imports_without_error() -> None:
     assert isinstance(cfg.TARGET_SCORE, float)
     assert isinstance(cfg.SSH_TARGETS, dict)
     assert isinstance(cfg.CONFIG, dict)
+
+
+def test_core_config_systemexit_on_invalid_config(tmp_path: Path) -> None:
+    """Import-time fail-fast: broken config.json must cause SystemExit with a useful message.
+
+    Runs in a subprocess to avoid corrupting the current process's core.config module.
+    """
+    import subprocess
+    import sys
+
+    bad_config = tmp_path / "config.json"
+    # ollama block present but missing the required judge_url field
+    bad_config.write_text(
+        json.dumps(
+            {
+                "ollama": {"main_url": "http://host:11434"},
+                "autonomy": {"target_score": 9.0, "max_iterations": 3},
+                "ssh_targets": [],
+            }
+        )
+    )
+
+    script = (
+        "import sys; sys.path.insert(0, '.'); "
+        "import core.paths; "
+        f"core.paths.CONFIG_PATH = '{bad_config}'; "
+        "import importlib, core.config; importlib.reload(core.config)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode != 0, "Expected non-zero exit for invalid config"
+    output = result.stderr + result.stdout
+    assert b"[core.config]" in output, f"Expected '[core.config]' in output; got: {output!r}"
+    assert str(bad_config).encode() in output, (
+        f"Expected config path in output; got: {output!r}"
+    )
+    # Pydantic includes the field path in the error — judge_url is the missing required field
+    assert b"judge_url" in output, f"Expected 'judge_url' in output; got: {output!r}"

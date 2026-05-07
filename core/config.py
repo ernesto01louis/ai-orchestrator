@@ -29,7 +29,7 @@ if not _config_path.exists():
         _config_path = _example_path
 
 with open(_config_path) as _f:
-    _raw: dict = json.load(_f)
+    _raw: dict[str, object] = json.load(_f)
 
 try:
     _settings = OrchestratorSettings.model_validate(_raw)
@@ -40,7 +40,7 @@ except ValidationError as _exc:
 
 # Keep CONFIG as a plain dict for back-compat (prefect_io/__init__.py and
 # any other code that does CONFIG.get(...)).
-CONFIG: dict = _raw
+CONFIG: dict[str, object] = _raw
 
 # ---------------------------------------------------------------------------
 # Derived module-level constants — read from the validated _settings object
