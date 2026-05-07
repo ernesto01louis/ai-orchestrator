@@ -139,3 +139,13 @@ POSTGRES_POOL_SIZE = _settings.postgres.pool_size
 POSTGRES_POOL_MAX_OVERFLOW = _settings.postgres.pool_max_overflow
 POSTGRES_STATEMENT_TIMEOUT_MS = _settings.postgres.statement_timeout_ms
 POSTGRES_RECONCILE_ON_STARTUP = _settings.postgres.reconcile_on_startup
+
+# Phase 2.2 Redis ephemeral state. REDIS_URL in .env wins over the
+# config.json value (mirrors POSTGRES_DSN pattern).
+REDIS_ENABLED = _settings.redis.enabled
+REDIS_URL = os.getenv("REDIS_URL", "") or _settings.redis.url
+REDIS_SOCKET_CONNECT_TIMEOUT = _settings.redis.socket_connect_timeout
+REDIS_SOCKET_TIMEOUT = _settings.redis.socket_timeout
+REDIS_RUN_STATUS_TTL = _settings.redis.run_status_ttl
+REDIS_URL_CACHE_TTL = _settings.redis.url_cache_ttl
+REDIS_EMBED_CACHE_TTL = _settings.redis.embed_cache_ttl

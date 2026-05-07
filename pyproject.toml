@@ -10,12 +10,13 @@ orchestrator = "cli.main:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-q --strict-markers -m 'not prefect_real and not postgres_real'"
+addopts = "-q --strict-markers -m 'not prefect_real and not postgres_real and not redis_real'"
 markers = [
     "live: tests that hit the live orchestrator at http://127.0.0.1:8000 (requires the service to be running)",
     "inprocess: tests that import app.py in-process via TestClient",
     "prefect_real: requires a real Prefect 3 server reachable at $PREFECT_API_URL",
     "postgres_real: requires a real Postgres reachable at $POSTGRES_DSN (Phase 2.1)",
+    "redis_real: requires a real Redis reachable at $REDIS_URL (Phase 2.2)",
 ]
 
 [tool.ruff]
