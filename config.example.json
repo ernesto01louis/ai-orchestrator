@@ -106,5 +106,14 @@
     "api_url": "http://prefect.tailnet:4200/api",
     "execution_mode": "in_process",
     "work_pool": "orchestrator-pool"
+  },
+  "postgres": {
+    "_comment": "Phase 2.1 durable system-of-record. Set enabled=true after install_postgres.sh + alembic upgrade head. Set POSTGRES_DSN in .env, not here.",
+    "enabled": false,
+    "dsn": "",
+    "pool_size": 5,
+    "pool_max_overflow": 5,
+    "statement_timeout_ms": 5000,
+    "reconcile_on_startup": true
   }
 }
