@@ -113,7 +113,28 @@ def _annotate_envelope(
 
 
 def _refresh_url_cache() -> None:
+    """Repopulate the model→server cache.
+
+    Phase 2.2.4: when Redis is enabled, prefer the cross-instance hash
+    in Redis as the source of truth. If Redis has a fresh entry, hydrate
+    the in-process dict from it and skip the ``/api/tags`` round-trip.
+    Otherwise fall back to the today's behaviour (single-flight refresh
+    against each Ollama server) and write the result back to Redis so
+    the next instance to refresh shares it.
+    """
     global _url_cache, _url_cache_ts
+
+    # Cheap fast-path: if Redis already has this round's cache, skip
+    # acquiring _url_cache_lock entirely. ``url_cache_get_all`` is a
+    # single HGETALL when Redis is enabled, returns ``None`` otherwise.
+    from core import redis_cache  # noqa: PLC0415
+    cached_from_redis = redis_cache.url_cache_get_all()
+    if cached_from_redis:
+        with _url_cache_lock:
+            _url_cache = cached_from_redis
+            _url_cache_ts = time.time()
+        return
+
     with _url_cache_lock:
         # Double-check: another thread may have refreshed while we waited.
         if time.time() - _url_cache_ts <= _URL_CACHE_TTL:
@@ -128,6 +149,10 @@ def _refresh_url_cache() -> None:
                         cache[m["name"]] = base_url
             except (requests.exceptions.RequestException, ValueError):
                 pass
+        # Push the freshly-built cache to Redis so other instances
+        # share this round (no-op when Redis is disabled).
+        from core import config as _config  # noqa: PLC0415
+        redis_cache.url_cache_store(cache, _config.REDIS_URL_CACHE_TTL)
         _url_cache = cache
         _url_cache_ts = time.time()
 

@@ -115,5 +115,15 @@
     "pool_max_overflow": 5,
     "statement_timeout_ms": 5000,
     "reconcile_on_startup": true
+  },
+  "redis": {
+    "_comment": "Phase 2.2 ephemeral state store. Set enabled=true after install_redis.sh + REDIS_URL in .env. Format: redis://:<password>@<redis-lxc-ip>:6379/0",
+    "enabled": false,
+    "url": "",
+    "socket_connect_timeout": 2.0,
+    "socket_timeout": 5.0,
+    "run_status_ttl": 86400,
+    "url_cache_ttl": 60,
+    "embed_cache_ttl": 604800
   }
 }

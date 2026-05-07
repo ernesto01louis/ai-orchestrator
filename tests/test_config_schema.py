@@ -221,6 +221,105 @@ def test_core_config_exposes_postgres_constants() -> None:
     assert isinstance(cfg.POSTGRES_POOL_SIZE, int)
 
 
+def test_missing_optional_redis_block_uses_defaults() -> None:
+    """Phase 2.2: omitting 'redis' must yield enabled=False (dormant)."""
+    raw = _load_example()
+    raw.pop("redis", None)
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.redis.enabled is False
+    assert settings.redis.url == ""
+    assert settings.redis.socket_connect_timeout == 2.0
+    assert settings.redis.socket_timeout == 5.0
+    assert settings.redis.run_status_ttl == 86400
+    assert settings.redis.url_cache_ttl == 60
+    assert settings.redis.embed_cache_ttl == 604800
+
+
+def test_redis_block_in_example_parses_to_disabled() -> None:
+    """The 'redis' block in config.example.json must default to disabled."""
+    raw = _load_example()
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.redis.enabled is False
+    assert settings.redis.url == ""
+
+
+def test_redis_enabled_with_url_parses() -> None:
+    """A configured redis block with enabled=true and a real URL parses."""
+    raw = _load_example()
+    raw["redis"] = {
+        "enabled": True,
+        "url": "redis://:secret@192.168.2.185:6379/0",
+        "socket_connect_timeout": 1.0,
+        "socket_timeout": 3.0,
+        "run_status_ttl": 3600,
+        "url_cache_ttl": 30,
+        "embed_cache_ttl": 86400,
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.redis.enabled is True
+    assert settings.redis.url.startswith("redis://")
+    assert settings.redis.socket_connect_timeout == 1.0
+    assert settings.redis.socket_timeout == 3.0
+    assert settings.redis.run_status_ttl == 3600
+
+
+def test_redis_wrong_type_run_status_ttl_raises() -> None:
+    """redis.run_status_ttl must be an int; passing a string raises ValidationError."""
+    raw = _load_example()
+    raw["redis"] = {"enabled": True, "run_status_ttl": "forever"}
+    with pytest.raises(ValidationError) as exc_info:
+        OrchestratorSettings.model_validate(raw)
+    assert "run_status_ttl" in str(exc_info.value)
+
+
+def test_redis_unknown_keys_tolerated() -> None:
+    """_*_note keys inside the redis block must be tolerated (extra='allow')."""
+    raw = _load_example()
+    raw["redis"] = {
+        "_url_note": "Set REDIS_URL in .env",
+        "enabled": False,
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.redis.enabled is False
+
+
+def test_core_config_exposes_redis_constants() -> None:
+    """core.config must export the REDIS_* derived constants."""
+    import core.config as cfg  # noqa: PLC0415
+
+    assert hasattr(cfg, "REDIS_ENABLED")
+    assert hasattr(cfg, "REDIS_URL")
+    assert hasattr(cfg, "REDIS_SOCKET_CONNECT_TIMEOUT")
+    assert hasattr(cfg, "REDIS_SOCKET_TIMEOUT")
+    assert hasattr(cfg, "REDIS_RUN_STATUS_TTL")
+    assert hasattr(cfg, "REDIS_URL_CACHE_TTL")
+    assert hasattr(cfg, "REDIS_EMBED_CACHE_TTL")
+    assert isinstance(cfg.REDIS_RUN_STATUS_TTL, int)
+
+
+def test_core_config_redis_url_env_overrides_config() -> None:
+    """REDIS_URL env var must win over the config.json value (mirrors POSTGRES_DSN).
+
+    Runs in a subprocess to avoid contaminating the current core.config import.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "import os, sys; sys.path.insert(0, '.'); "
+        "os.environ['REDIS_URL'] = 'redis://envwin:1@override-host:6379/9'; "
+        "import core.config as cfg; "
+        "print(cfg.REDIS_URL)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    assert b"redis://envwin:1@override-host:6379/9" in result.stdout
+
+
 def test_core_config_postgres_dsn_env_overrides_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """POSTGRES_DSN env var must win over the config.json value (mirrors GOTIFY_TOKEN).
 

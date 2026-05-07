@@ -214,6 +214,41 @@ description from a vision model when available.
   `orchestrator_postgres_reconcile_rows_total{table}`,
   `orchestrator_postgres_reconcile_duration_seconds` on `/metrics`.
 
+**Redis ephemeral store (Phase 2.2, opt-in):**
+- Config: `redis.enabled=false` default. Set `REDIS_URL` in `.env`
+  and `redis.enabled=true` in `config.json` to activate.
+- Client: `core/redis_client.py` (sync `redis-py` 7.x).
+  `is_enabled()` gates every callsite. `decode_responses=True` so
+  callers get `str`, not `bytes`. Socket timeouts from config so a
+  wedged Redis can't stall handlers.
+- RUN_STATUS mirror: `core/runtime._mirror_run_status_to_redis`
+  is called from `_init_run_status` / `_update_run_status` after the
+  in-process write. JSON-encoded HSET + EXPIRE in a pipeline. Failures
+  log + Prom counter, never raise. The in-process `RUN_STATUS` dict
+  remains the hot-path read source — Redis is the cross-process /
+  survives-restart mirror.
+- Hydrate-on-startup: `core/runtime.hydrate_run_status_from_redis()`
+  hooks into `app.py:_lifespan` after Phase 2.1 reconcile. Runs in
+  `asyncio.to_thread`. Zero impact when disabled.
+- WS pub/sub: `core/runtime._WS_BROADCAST_CHANNEL = "ws_broadcast"`.
+  Every `_ws_broadcast` publishes a `{origin, msg}` envelope; a
+  daemon subscriber thread (`start_ws_broadcast_subscriber`) consumes
+  via `pubsub.get_message(timeout=1.0)` poll loop and re-delivers to
+  local `_ws_clients`. `_INSTANCE_ID` (per-process random hex, env
+  override `ORCHESTRATOR_INSTANCE_ID`) filters self-publishes so
+  single-process setups don't double-deliver.
+- Caches: `core/redis_cache.py` exposes `url_cache_get_all/store`
+  (Ollama model→server hash) and `embed_cache_get/set` (SHA256-keyed
+  embedding strings). `llm/ollama._refresh_url_cache` checks Redis
+  first; `memory_pkg.generate_embedding` tries Redis, falls back to
+  the JSON cache, lazy-promotes JSON hits into Redis. Both fall
+  through silently when Redis is disabled.
+- Metrics: `orchestrator_redis_run_status_writes_total
+  {operation,outcome}` on `/metrics` (operation in
+  {init,update,hydrate}; outcome in {success,failure}).
+- LXC bring-up: `scripts/install_redis.sh` (Debian 12 + Redis 7.0 +
+  AOF + `requirepass`). RUNBOOK § "Redis ephemeral store".
+
 **Operational hardening (Phase 1.8):**
 - Config validation: `core/config_schema.py` `OrchestratorSettings` —
   Pydantic v2 model loaded by `core/config.py` at import time. Bad
@@ -313,7 +348,23 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     `orchestrator_postgres_reconcile_duration_seconds`. Ships dormant —
     `postgres.enabled=false` default; operator action:
     `scripts/install_postgres.sh` → `alembic upgrade head` → flip flag.
-2.2 Redis for ephemeral state — pending.
+2.2 Redis for ephemeral state — DONE (v0.2.2-phase2.2, 2026-05-07).
+    LXC 203 `redis-server` (192.168.2.186, Debian 12 + redis-server
+    7.0.x, AOF on, `requirepass` auth, `allkeys-lru` eviction). Five
+    commits across `feat/phase2.2-redis`:
+    (2.2.1a) dormant Redis client + config wiring;
+    (2.2.1b) `scripts/install_redis.sh` + RUNBOOK section;
+    (2.2.2) RUN_STATUS write-through mirror + `hydrate_run_status_from_redis`
+    on startup;
+    (2.2.3) WS broadcast pub/sub fan-out via `_WS_BROADCAST_CHANNEL`,
+    instance-ID origin filter, poll-based subscriber loop;
+    (2.2.4) `core/redis_cache` for `_url_cache` + `_embed_cache` with
+    TTL.
+    Each layer no-ops when `redis.enabled=false`; flip the flag once
+    LXC 203 is reachable. One Prometheus counter
+    (`orchestrator_redis_run_status_writes_total{operation,outcome}`).
+    +57 net new tests (324 → 381 passing on the default suite, plus
+    7 `redis_real` tests against the live LXC). Live since 2026-05-07.
 2.3 OpenTelemetry — pending.
 2.4 Budget tracking — pending.
 2.5 SkyPilot for cloud-burst GPU — pending.
@@ -361,8 +412,21 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-07, Phase 2.1 (Postgres durable state) shipped
-in PR #11 (merge `c8375c1`, tag `v0.2.1-phase2.1`): 13 atomic commits,
+*Last updated: 2026-05-07, Phase 2.2 (Redis ephemeral state) shipped
+on `feat/phase2.2-redis`, tag `v0.2.2-phase2.2`. Five atomic commits
+(2.2.1 dormant client + config; 2.2.1 install_redis.sh + RUNBOOK;
+2.2.2 RUN_STATUS write-through mirror + hydrate-on-startup;
+2.2.3 WS broadcast pub/sub fan-out; 2.2.4 url_cache/embed_cache via
+core/redis_cache) plus a fix for the WS subscriber's idle socket
+timeout. +57 net new tests (324 → 381), 7 redis_real tests against
+live LXC 203. JSON / in-process state remains canonical; Redis is
+the cross-process coordination layer that unblocks horizontal scale.
+Live since 2026-05-07: LXC 203 (`redis-server`, 192.168.2.186) up,
+`redis.enabled=true`, REDIS_URL in .env, ai-orchestrator.service
+restarted cleanly with redis_ws_subscriber alive on idle pub/sub.
+
+Phase 2.1 (Postgres durable state, prior release) shipped in PR #11
+(merge `c8375c1`, tag `v0.2.1-phase2.1`): 13 atomic commits,
 +77 tests (247 → 324), ruff + mypy --strict clean on every Phase 2.1
 source module. JSON remains canonical; Postgres is the queryable
 mirror that unblocks Phase 2.4 budget aggregates and Phase 2.6 UI. Ships

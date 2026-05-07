@@ -270,11 +270,11 @@ clean on all touched files.
 
 Ships dormant — `postgres.enabled=false` default. Operator action: stand up new LXC, `alembic upgrade head`, flip the flag.
 
-### 2.2 Redis for ephemeral state
-- [ ] Redis in a new LXC
-- [ ] Move active `RUN_STATUS` to Redis
-- [ ] Move `_ws_clients` coordination to Redis pubsub
-- [ ] Move `_url_cache` and `_embed_cache` to Redis
+### 2.2 Redis for ephemeral state — DONE (v0.2.2-phase2.2)
+- [x] Redis in a new LXC (LXC 203 `redis-server` at 192.168.2.186, Debian 12 + redis-server 7.0.x, AOF on, `requirepass`, `bind 0.0.0.0 ::`, `maxmemory-policy allkeys-lru`)
+- [x] Move active `RUN_STATUS` to Redis (write-through mirror via `core/runtime._mirror_run_status_to_redis`; `hydrate_run_status_from_redis()` repopulates on startup)
+- [x] Move `_ws_clients` coordination to Redis pubsub (per-instance ID envelope via `_publish_ws_broadcast_to_redis`; daemon subscriber thread filters self-origin to avoid double-delivery; `pubsub.get_message(timeout=1.0)` poll loop survives idle windows)
+- [x] Move `_url_cache` and `_embed_cache` to Redis (`core/redis_cache` exposes `url_cache_get_all/store` + `embed_cache_get/set` with TTL; both fall back to today's in-process / JSON storage when Redis is disabled)
 
 ### 2.3 OpenTelemetry
 - [ ] `opentelemetry-instrumentation-fastapi`

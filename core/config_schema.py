@@ -171,6 +171,30 @@ class PostgresConfig(_FlexModel):
     reconcile_on_startup: bool = True
 
 
+class RedisConfig(_FlexModel):
+    """Phase 2.2 ephemeral state store (Redis in its own LXC).
+
+    In-process state under ``core/runtime`` (RUN_STATUS, ws clients) and
+    process-local caches in ``llm/ollama`` and ``memory_pkg`` remain the
+    fast path; Redis is the cross-process coordination + survives-restart
+    layer. Defaults keep the feature dormant (``enabled=False``) so the
+    LXC can come up after the application code has shipped.
+    """
+
+    enabled: bool = False
+    # URL may be empty when ``enabled=False``. When enabled, the value
+    # in config.json is overridden by the ``REDIS_URL`` env var if set
+    # (mirrors POSTGRES_DSN precedence).
+    url: str = ""
+    socket_connect_timeout: float = 2.0
+    socket_timeout: float = 5.0
+    # TTLs (seconds) — caches that move to Redis use these defaults
+    # unless their callsite passes an explicit ttl.
+    run_status_ttl: int = 86400  # 1 day; keeps completed runs queryable while live
+    url_cache_ttl: int = 60  # mirrors today's TTL_CACHE in llm/ollama
+    embed_cache_ttl: int = 604800  # 7 days; embeddings rarely change
+
+
 # ---------------------------------------------------------------------------
 # Top-level settings model
 # ---------------------------------------------------------------------------
@@ -204,3 +228,4 @@ class OrchestratorSettings(_FlexModel):
     prefect: PrefectConfig = PrefectConfig()
     dream: DreamConfig = DreamConfig()
     postgres: PostgresConfig = PostgresConfig()
+    redis: RedisConfig = RedisConfig()
