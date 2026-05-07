@@ -687,3 +687,104 @@ Postgres-LXC loss is recoverable: rebuild the LXC, re-run
 orchestrator service, and reconcile-on-startup re-populates every row
 from the JSON state. The `pg_dump` chain is for fast recovery, not
 disaster recovery.
+
+## Redis ephemeral store (Phase 2.2)
+
+The orchestrator uses Redis as the cross-process coordination + cache
+layer for ephemeral state: live `RUN_STATUS` (Phase 2.2.2), WebSocket
+client pub/sub (Phase 2.2.3), and the LLM URL + embedding caches
+(Phase 2.2.4). In-process state under `core/runtime` and
+`llm/ollama` remains the fast path; Redis is failure-tolerant — when
+unreachable, the orchestrator falls back to in-process semantics. No
+durable run data lives in Redis: completed runs are canonical in
+`memory/run_index.json` and mirrored to Postgres.
+
+Toggleable via the `redis.enabled` config flag.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| Redis server | dedicated LXC (operator's choice — suggested LXC 203) | Debian 12 + redis-server 7.0.x from base apt |
+| Auth | `requirepass` from `REDIS_URL` | LAN-bound, no public exposure |
+| Persistence | AOF, `appendfsync everysec` | ≤1s data loss on crash; survives restart |
+| Eviction | `allkeys-lru` | cache-friendly once Phase 2.2.4 caches load |
+| Backup | none by default | ephemeral by design; see "Backup (optional)" below |
+
+### One-time Redis setup
+
+1. On Proxmox: create a fresh Debian 12 LXC. Suggested ID 203, 1 vCPU,
+   2 GB RAM, 10 GB disk. Bridge `vmbr0`. Static IP on the LAN
+   (e.g. `192.168.2.185`).
+2. From the Proxmox host, copy the script in and run it:
+   ```bash
+   pct push 203 /opt/ai-orchestrator/scripts/install_redis.sh /root/install_redis.sh
+   pct enter 203
+   bash /root/install_redis.sh
+   ```
+   The script installs `redis-server`, generates a URL-safe
+   alphanumeric `requirepass` (printed at the end — save it then),
+   sets `bind 0.0.0.0 ::`, enables AOF persistence with
+   `appendfsync everysec`, and sets `maxmemory-policy allkeys-lru`.
+   **Pre-set** `REDIS_ORCHESTRATOR_PASSWORD` in the environment if you
+   want to choose the password yourself (must be URL-safe — no
+   `/+=@:?#%&`).
+3. From orchestrator LXC 200, smoke-test connectivity:
+   ```bash
+   apt-get install -y redis-tools
+   redis-cli -h <redis-lxc-ip> -a '<password>' --no-auth-warning ping
+   ```
+4. Add `REDIS_URL` to `/opt/ai-orchestrator/.env`:
+   ```
+   REDIS_URL=redis://:<password>@<redis-lxc-ip>:6379/0
+   ```
+5. Flip `redis.enabled = true` in `config.json` (under the new `redis`
+   block) and restart the orchestrator service. On startup, the
+   orchestrator falls back to in-process state if Redis is unreachable,
+   so this flip is non-disruptive.
+6. Verify with the live-marker test suite:
+   ```bash
+   cd /opt/ai-orchestrator && source venv/bin/activate
+   REDIS_URL='redis://:<password>@<redis-lxc-ip>:6379/0' \
+       python -m pytest -m redis_real -q
+   ```
+
+### Backup (optional)
+
+Redis holds ephemeral state by design; losing it costs at most a
+single in-flight run's progress and a cold cache. If you want backups
+anyway:
+
+```sh
+# /etc/cron.daily/orchestrator-redis-dump (operator action — not
+# installed by install_redis.sh)
+#!/bin/sh
+set -eu
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/redis}"
+mkdir -p "$BACKUP_DIR"
+TS="$(date -u +%Y%m%d-%H%M%S)"
+PASS="$(awk '/^requirepass /{print $2}' /etc/redis/redis.conf)"
+redis-cli -a "$PASS" --no-auth-warning BGSAVE >/dev/null
+sleep 5
+tar -C /var/lib -czf "${BACKUP_DIR}/redis-${TS}.tar.gz" redis
+find "${BACKUP_DIR}" -name 'redis-*.tar.gz' -mtime +14 -delete
+```
+
+Same off-LXC redirection trick as the Postgres backup applies — point
+`BACKUP_DIR` at an SSHFS / NFS mount of TrueNAS for true backup
+independence.
+
+### Common Redis issues
+
+- `NOAUTH Authentication required` from `redis-cli` → forgot the `-a
+  <password>` flag (or the password mismatches). Re-run with the value
+  from `/etc/redis/redis.conf:requirepass`.
+- `Could not connect to Redis at 192.168.2.x:6379: Connection refused`
+  → either redis-server isn't running (`systemctl status redis-server`)
+  or `bind` wasn't widened off `127.0.0.1`. Check the active config
+  with `redis-cli CONFIG GET bind` (must include `0.0.0.0` for the
+  orchestrator LXC to reach it).
+- Orchestrator falls back to in-process state silently → that's the
+  designed failure mode. Check the orchestrator's structured WARN logs
+  for `redis_*` lines, then `redis-cli -h <lxc-ip> -a <pass> ping` from
+  LXC 200 to isolate networking vs. Redis-process problems.
