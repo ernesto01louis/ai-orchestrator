@@ -339,6 +339,24 @@ def update_model_stats(model, role, language, score, was_winner, succeeded,
 
     save_model_stats(stats)
 
+    # Phase 2.1 dual-write: mirror today's row into Postgres.
+    # Counters increment atomically; jsonb breakdowns are best-effort
+    # snapshots of the JSON aggregate (reconcile re-syncs on startup).
+    try:
+        from core import db_writethrough
+        db_writethrough.mirror_model_stats_daily(
+            model=model,
+            score=score,
+            was_winner=was_winner,
+            succeeded=succeeded,
+            by_language=s.get("by_language"),
+            by_role=s.get("by_role"),
+            by_project_type=s.get("by_project_type"),
+        )
+    except Exception:
+        # mirror_model_stats_daily already swallows; this is belt-and-braces.
+        pass
+
 
 def get_model_recommendation(language, project_type):
     """

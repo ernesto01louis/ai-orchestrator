@@ -462,3 +462,85 @@ def test_mirror_evidence_bundle_swallows_db_exception(
     assert any(
         "postgres_writethrough_failed" in r.message for r in caplog.records
     )
+
+
+# ---------------------------------------------------------------------------
+# mirror_model_stats_daily (2.1.10)
+# ---------------------------------------------------------------------------
+
+def test_mirror_model_stats_daily_no_op_when_disabled(
+    disabled_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spy = MagicMock(side_effect=AssertionError("get_session called when disabled"))
+    monkeypatch.setattr(db, "get_session", spy)
+    db_writethrough.mirror_model_stats_daily(
+        model="qwen2.5:72b", score=9.0, was_winner=True, succeeded=True
+    )
+    spy.assert_not_called()
+
+
+def test_mirror_model_stats_daily_passes_atomic_delta(
+    enabled_db_capturing_session: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spy = MagicMock()
+    monkeypatch.setattr("core.db_models.upsert_model_stats_daily", spy)
+    db_writethrough.mirror_model_stats_daily(
+        model="qwen2.5:72b",
+        score=8.5,
+        was_winner=True,
+        succeeded=True,
+        by_language={"python": {"runs": 3}},
+        by_role={"generator": {"runs": 3}},
+    )
+    spy.assert_called_once()
+    session_arg, delta = spy.call_args.args
+    assert session_arg is enabled_db_capturing_session["session"]
+    assert delta["model_name"] == "qwen2.5:72b"
+    assert delta["runs"] == 1
+    assert delta["total_score"] == 8.5
+    assert delta["wins"] == 1
+    assert delta["failures"] == 0
+    assert delta["source"] == "live"
+    assert delta["by_language"] == {"python": {"runs": 3}}
+    assert delta["by_role"] == {"generator": {"runs": 3}}
+    # date defaults to today (UTC)
+    from datetime import UTC, datetime
+    assert delta["date"] == datetime.now(UTC).date()
+
+
+def test_mirror_model_stats_daily_failure_path_increments_failures() -> None:
+    """succeeded=False → failures=1, wins=0."""
+    # Pure helper test on the wrapper's input shape (no DB needed)
+    spy = MagicMock()
+    # We need an enabled DB to reach the DAO. Use a quick monkey-patch:
+    import contextlib
+    from unittest.mock import patch
+    with patch.object(db, "is_enabled", return_value=True), \
+         contextlib.contextmanager(lambda: iter([MagicMock()]))(), \
+         patch.object(db, "get_session", lambda: contextlib.nullcontext(MagicMock())), \
+         patch("core.db_models.upsert_model_stats_daily", spy):
+        db_writethrough.mirror_model_stats_daily(
+            model="m", score=0.0, was_winner=False, succeeded=False,
+        )
+    spy.assert_called_once()
+    delta = spy.call_args.args[1]
+    assert delta["wins"] == 0
+    assert delta["failures"] == 1
+
+
+def test_mirror_model_stats_daily_swallows_db_exception(
+    enabled_db_capturing_session: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        "core.db_models.upsert_model_stats_daily",
+        MagicMock(side_effect=RuntimeError("postgres down")),
+    )
+    db_writethrough.mirror_model_stats_daily(
+        model="m", score=1.0, was_winner=False, succeeded=True
+    )
+    assert any(
+        "postgres_writethrough_failed" in r.message for r in caplog.records
+    )

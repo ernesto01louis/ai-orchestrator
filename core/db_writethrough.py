@@ -275,9 +275,64 @@ def mirror_llm_call(record: Any) -> None:
         )
 
 
+def mirror_model_stats_daily(
+    *,
+    model: str,
+    score: float,
+    was_winner: bool,
+    succeeded: bool,
+    by_language: dict[str, Any] | None = None,
+    by_role: dict[str, Any] | None = None,
+    by_project_type: dict[str, Any] | None = None,
+) -> None:
+    """Mirror a single model-stats update into today's row.
+
+    Called from ``memory_pkg.update_model_stats`` after the JSON file
+    write succeeds. Counter columns (``runs``, ``total_score``,
+    ``wins``, ``failures``) are atomically incremented server-side via
+    the DAO's ``ON CONFLICT … DO UPDATE SET runs = … + EXCLUDED.runs``
+    pattern — concurrent campaigns can't race-and-overwrite each other
+    on the counters.
+
+    The ``by_*`` jsonb columns are best-effort point-in-time snapshots
+    of the JSON-canonical aggregate; on conflict the DAO REPLACES them
+    rather than deep-merging (jsonb has no native deep-merge before
+    PG14, and the JSON file is canonical anyway). Reconcile-on-startup
+    re-syncs them.
+    """
+    if not db.is_enabled():
+        return
+    try:
+        delta = {
+            "model_name": model,
+            "date": datetime.now(UTC).date(),
+            "runs": 1,
+            "total_score": float(score),
+            "wins": 1 if was_winner else 0,
+            "failures": 0 if succeeded else 1,
+            "by_language": by_language or {},
+            "by_role": by_role or {},
+            "by_project_type": by_project_type or {},
+            "source": "live",
+            "updated_at": _utcnow(),
+        }
+        with db.get_session() as session:
+            db_models.upsert_model_stats_daily(session, delta)
+    except Exception as exc:
+        log.warning(
+            "postgres_writethrough_failed",
+            extra={
+                "table": "model_stats_daily",
+                "model": model,
+                "error": repr(exc),
+            },
+        )
+
+
 __all__ = [
     "mirror_campaigns",
     "mirror_evidence_bundle",
     "mirror_llm_call",
+    "mirror_model_stats_daily",
     "mirror_run_completion",
 ]
