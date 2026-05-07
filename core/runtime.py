@@ -445,7 +445,14 @@ def _init_run_status(run_id: str, **kwargs) -> None:
 
 # ── log writer ─────────────────────────────────────
 def log(run_id: str, message: str) -> None:
-    """Per-run log writer with file lock + WS broadcast + status update."""
+    """Per-run log writer with file lock + WS broadcast + status update.
+
+    Phase 2.3: when there's an active OTel span on the calling thread
+    (ie. we're inside an LLM call, ssh_command, or anything wrapped by
+    a span), the log line is attached as a span event with run_id +
+    message attributes. Zero-cost when no span is active or OTel is
+    disabled — span events on the no-op tracer return immediately.
+    """
     ts = datetime.utcnow().strftime("%H:%M:%S")
     line = f"[{ts}] [{run_id}] {message}"
     print(line)
@@ -460,6 +467,19 @@ def log(run_id: str, message: str) -> None:
                 fcntl.flock(f, fcntl.LOCK_UN)
     except OSError as e:
         print(f"WARNING: could not write to log file: {e}")
+
+    # Best-effort: attach the log line as a span event to whatever span
+    # is active on this thread. ``trace.get_current_span()`` returns
+    # OTel's INVALID_SPAN sentinel when there's no active span, and
+    # ``add_event`` on that sentinel is a no-op — zero cost.
+    try:
+        from opentelemetry import trace as _otel_trace  # noqa: PLC0415
+        _otel_trace.get_current_span().add_event(
+            "orchestrator.log",
+            attributes={"run_id": run_id or "", "message": message[:500]},
+        )
+    except Exception:
+        pass
 
     _update_run_status(run_id, phase=message)
     _ws_broadcast({"type": "log", "run_id": run_id, "line": line, "phase": message})

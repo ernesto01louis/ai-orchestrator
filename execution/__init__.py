@@ -367,6 +367,7 @@ def validate_target(target):
 
 
 def ssh_command(target, command, *, quote_command=False):
+    from core.otel import get_tracer  # noqa: PLC0415
 
     validate_target(target)
 
@@ -385,26 +386,40 @@ def ssh_command(target, command, *, quote_command=False):
         remote_cmd
     ]
 
-    try:
-        r = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=SSH_TIMEOUT + 30
-        )
+    tracer = get_tracer("ai-orchestrator.execution")
+    with tracer.start_as_current_span("ssh.command") as span:
+        # Truncate the command for trace attribute storage — full
+        # commands can include long literals; 200 chars is enough for
+        # operators to identify what ran.
+        span.set_attribute("ssh.target", target)
+        span.set_attribute("ssh.host", cfg["host"])
+        span.set_attribute("ssh.username", cfg["username"])
+        span.set_attribute("ssh.command_preview", str(command)[:200])
+        span.set_attribute("ssh.timeout_seconds", SSH_TIMEOUT + 30)
+        try:
+            r = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=SSH_TIMEOUT + 30
+            )
+            span.set_attribute("ssh.returncode", r.returncode)
+            span.set_attribute("ssh.stdout_bytes", len(r.stdout or ""))
+            span.set_attribute("ssh.stderr_bytes", len(r.stderr or ""))
+            return {
+                "stdout": r.stdout,
+                "stderr": r.stderr,
+                "returncode": r.returncode
+            }
 
-        return {
-            "stdout": r.stdout,
-            "stderr": r.stderr,
-            "returncode": r.returncode
-        }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "stdout": "",
-            "stderr": f"SSH command timed out after {SSH_TIMEOUT + 30}s",
-            "returncode": -1
-        }
+        except subprocess.TimeoutExpired as e:
+            span.set_attribute("ssh.outcome", "timeout")
+            span.record_exception(e)
+            return {
+                "stdout": "",
+                "stderr": f"SSH command timed out after {SSH_TIMEOUT + 30}s",
+                "returncode": -1
+            }
 
 
 def deploy_file(local, remote, target):
