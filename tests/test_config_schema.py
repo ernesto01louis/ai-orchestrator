@@ -297,6 +297,95 @@ def test_core_config_exposes_redis_constants() -> None:
     assert isinstance(cfg.REDIS_RUN_STATUS_TTL, int)
 
 
+def test_missing_optional_otel_block_uses_defaults() -> None:
+    """Phase 2.3: omitting 'otel' must yield enabled=False (dormant)."""
+    raw = _load_example()
+    raw.pop("otel", None)
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.otel.enabled is False
+    assert settings.otel.endpoint == ""
+    assert settings.otel.service_name == "ai-orchestrator"
+    assert settings.otel.sample_ratio == 1.0
+
+
+def test_otel_block_in_example_parses_to_disabled() -> None:
+    """The 'otel' block in config.example.json must default to disabled."""
+    raw = _load_example()
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.otel.enabled is False
+    assert settings.otel.endpoint == ""
+
+
+def test_otel_enabled_with_endpoint_parses() -> None:
+    """A configured otel block with enabled=true and a real endpoint parses."""
+    raw = _load_example()
+    raw["otel"] = {
+        "enabled": True,
+        "endpoint": "192.168.2.187:4317",
+        "service_name": "test-svc",
+        "sample_ratio": 0.25,
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.otel.enabled is True
+    assert settings.otel.endpoint == "192.168.2.187:4317"
+    assert settings.otel.service_name == "test-svc"
+    assert settings.otel.sample_ratio == 0.25
+
+
+def test_otel_wrong_type_sample_ratio_raises() -> None:
+    """otel.sample_ratio must be a float; passing a non-numeric string raises."""
+    raw = _load_example()
+    raw["otel"] = {"enabled": True, "sample_ratio": "all"}
+    with pytest.raises(ValidationError) as exc_info:
+        OrchestratorSettings.model_validate(raw)
+    assert "sample_ratio" in str(exc_info.value)
+
+
+def test_otel_unknown_keys_tolerated() -> None:
+    """_*_note keys inside the otel block must be tolerated (extra='allow')."""
+    raw = _load_example()
+    raw["otel"] = {
+        "_endpoint_note": "Set OTEL_ENDPOINT in .env",
+        "enabled": False,
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.otel.enabled is False
+
+
+def test_core_config_exposes_otel_constants() -> None:
+    """core.config must export the OTEL_* derived constants."""
+    import core.config as cfg  # noqa: PLC0415
+
+    assert hasattr(cfg, "OTEL_ENABLED")
+    assert hasattr(cfg, "OTEL_ENDPOINT")
+    assert hasattr(cfg, "OTEL_SERVICE_NAME")
+    assert hasattr(cfg, "OTEL_SAMPLE_RATIO")
+    assert isinstance(cfg.OTEL_SAMPLE_RATIO, float)
+
+
+def test_core_config_otel_endpoint_env_overrides_config() -> None:
+    """OTEL_ENDPOINT env var must win over the config.json value.
+
+    Runs in a subprocess to avoid contaminating the current core.config import.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "import os, sys; sys.path.insert(0, '.'); "
+        "os.environ['OTEL_ENDPOINT'] = 'tempo.envwin:4317'; "
+        "import core.config as cfg; "
+        "print(cfg.OTEL_ENDPOINT)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    assert b"tempo.envwin:4317" in result.stdout
+
+
 def test_core_config_redis_url_env_overrides_config() -> None:
     """REDIS_URL env var must win over the config.json value (mirrors POSTGRES_DSN).
 

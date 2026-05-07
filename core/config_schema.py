@@ -171,6 +171,25 @@ class PostgresConfig(_FlexModel):
     reconcile_on_startup: bool = True
 
 
+class OTelConfig(_FlexModel):
+    """Phase 2.3 OpenTelemetry tracing configuration.
+
+    Tracing is dormant by default (``enabled=False``); when activated,
+    the orchestrator initialises a global TracerProvider that exports
+    spans via OTLP/gRPC to ``endpoint`` and auto-instruments FastAPI
+    + the ``requests`` library. ``sample_ratio`` is a head-based ratio
+    in ``[0, 1]`` — ``1.0`` records every trace, ``0.1`` ten percent.
+    """
+
+    enabled: bool = False
+    # OTLP/gRPC endpoint, e.g. "tempo.tailnet:4317" or "192.168.2.187:4317".
+    # Env var ``OTEL_ENDPOINT`` overrides config.json (mirrors POSTGRES_DSN
+    # / REDIS_URL precedence).
+    endpoint: str = ""
+    service_name: str = "ai-orchestrator"
+    sample_ratio: float = 1.0
+
+
 class RedisConfig(_FlexModel):
     """Phase 2.2 ephemeral state store (Redis in its own LXC).
 
@@ -229,3 +248,4 @@ class OrchestratorSettings(_FlexModel):
     dream: DreamConfig = DreamConfig()
     postgres: PostgresConfig = PostgresConfig()
     redis: RedisConfig = RedisConfig()
+    otel: OTelConfig = OTelConfig()

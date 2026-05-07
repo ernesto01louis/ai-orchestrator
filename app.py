@@ -145,6 +145,15 @@ async def _lifespan(app_instance):
         start_ws_broadcast_subscriber()
     except Exception as e:
         print(f"WARNING: Redis ws-broadcast subscriber failed to start: {e}")
+
+    # Phase 2.3 OpenTelemetry: initialise the global TracerProvider
+    # and auto-instrument FastAPI + requests. No-op when otel.enabled
+    # is false. Idempotent — safe to call on reload.
+    try:
+        from core.otel import init_tracing  # noqa: PLC0415
+        init_tracing(app)
+    except Exception as e:
+        print(f"WARNING: OpenTelemetry init failed at startup: {e}")
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield

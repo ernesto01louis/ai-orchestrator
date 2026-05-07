@@ -249,6 +249,38 @@ description from a vision model when available.
 - LXC bring-up: `scripts/install_redis.sh` (Debian 12 + Redis 7.0 +
   AOF + `requirepass`). RUNBOOK § "Redis ephemeral store".
 
+**OpenTelemetry tracing (Phase 2.3, opt-in):**
+- Config: `otel.enabled=false` default. Set `OTEL_ENDPOINT` in `.env`
+  and `otel.enabled=true` in `config.json` to activate.
+- SDK: `opentelemetry-api/sdk/proto/exporter-otlp-proto-grpc==1.41.1`
+  + `opentelemetry-instrumentation-{fastapi,requests,asgi}==0.62b1`.
+  All beta-channel pins matched; bump as a group.
+- Init: `core/otel.py:init_tracing(app)` — idempotent.
+  `TraceIdRatioBased` sampling, `BatchSpanProcessor`, `OTLPSpanExporter`
+  (gRPC, insecure for LAN). Auto-instruments FastAPI + requests.
+  Fail-tolerant: any init exception logs + returns False, never
+  raises into `_lifespan`.
+- Manual spans:
+    * `llm/ollama.query_ollama` → `llm.generate` span
+    * `llm/ollama.query_ollama_structured` → `llm.chat` span
+      (both with attrs llm.{model,url,endpoint_kind,role,
+      eval_count,response_chars,outcome} + orchestrator.run_id)
+    * `execution.ssh_command` → `ssh.command` span (ssh.{target,
+      host,username,command_preview,returncode,stdout_bytes,
+      stderr_bytes,outcome,timeout_seconds})
+    * `core/runtime.log()` — adds an `orchestrator.log` event to
+      whatever span is currently active on the calling thread.
+      Zero-cost when no span is active (OTel's INVALID_SPAN
+      sentinel `add_event` is a no-op).
+- LXC bring-up: `scripts/install_tempo.sh` (Debian 12 + Tempo
+  2.6.x single-binary, OTLP/gRPC :4317, OTLP/HTTP :4318, query
+  :3200, local-blocks 14d retention) +
+  `scripts/install_grafana.sh` (Debian 12 + Grafana 12.4.3 from
+  apt.grafana.com — pinned to dodge the 13.0.1 reset-admin-password
+  regression — auto-provisioned datasources for Tempo +
+  Prometheus, "AI Orchestrator — Per-run traces" dashboard).
+  RUNBOOK §§ "OpenTelemetry tracing" + "Grafana dashboards".
+
 **Operational hardening (Phase 1.8):**
 - Config validation: `core/config_schema.py` `OrchestratorSettings` —
   Pydantic v2 model loaded by `core/config.py` at import time. Bad
@@ -365,7 +397,23 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     (`orchestrator_redis_run_status_writes_total{operation,outcome}`).
     +57 net new tests (324 → 381 passing on the default suite, plus
     7 `redis_real` tests against the live LXC). Live since 2026-05-07.
-2.3 OpenTelemetry — pending.
+2.3 OpenTelemetry — DONE (v0.2.3-phase2.3, 2026-05-07). LXC 204
+    `tempo-server` (192.168.2.187, Tempo 2.6.1) + LXC 205
+    `grafana-server` (192.168.2.188, Grafana 12.4.3 pinned). Five
+    commits across `feat/phase2.3-otel`:
+    (2.3.1) dormant OTel SDK + FastAPI/requests auto-instrumentation;
+    (2.3.2) manual spans on log() / ssh_command / two query_ollama*
+    entrypoints with domain attrs (orchestrator.run_id, llm.{model,
+    role,outcome}, ssh.{target,host,returncode});
+    (2.3.3) `scripts/install_tempo.sh` + LXC 204 + RUNBOOK +
+    end-to-end verified (5 traces with rootServiceName=ai-orchestrator);
+    (2.3.4) `scripts/install_grafana.sh` + LXC 205 + auto-provisioned
+    Tempo + Prometheus datasources + "AI Orchestrator — Per-run
+    traces" dashboard (UID orchestrator-per-run, TraceQL filter on
+    orchestrator.run_id variable).
+    Each layer no-ops when `otel.enabled=false`; flip the flag once
+    Tempo is reachable. +23 net new tests on the default suite (381
+    → 404). Live since 2026-05-07.
 2.4 Budget tracking — pending.
 2.5 SkyPilot for cloud-burst GPU — pending.
 2.6 New UI — pending.
@@ -412,7 +460,20 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-07, Phase 2.2 (Redis ephemeral state) shipped
+*Last updated: 2026-05-07, Phase 2.3 (OpenTelemetry tracing) shipped
+on `feat/phase2.3-otel`, tag `v0.2.3-phase2.3`. Six atomic commits
+(2.3.1 dormant SDK + auto-instrument; 2.3.2 manual spans on log /
+ssh / LLM; 2.3.3 install_tempo.sh + LXC 204 LIVE; 2.3.4
+install_grafana.sh + LXC 205 LIVE + datasources + per-run dashboard;
+docs sweep). +23 net new tests (381 → 404), end-to-end verified by
+generating /health traffic and watching traces flow into Tempo via
+`/api/search?tags=service.name=ai-orchestrator`. Tempo 2.6.1 + Grafana
+12.4.3 (pinned — 13.0.1 has reset-admin-password regression).
+Live since 2026-05-07: LXC 204 (`tempo-server`, 192.168.2.187) +
+LXC 205 (`grafana-server`, 192.168.2.188), `otel.enabled=true`,
+`OTEL_ENDPOINT=192.168.2.187:4317` in .env.
+
+Phase 2.2 (Redis ephemeral state, prior release) shipped
 on `feat/phase2.2-redis`, tag `v0.2.2-phase2.2`. Five atomic commits
 (2.2.1 dormant client + config; 2.2.1 install_redis.sh + RUNBOOK;
 2.2.2 RUN_STATUS write-through mirror + hydrate-on-startup;

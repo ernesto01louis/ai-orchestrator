@@ -788,3 +788,176 @@ independence.
   designed failure mode. Check the orchestrator's structured WARN logs
   for `redis_*` lines, then `redis-cli -h <lxc-ip> -a <pass> ping` from
   LXC 200 to isolate networking vs. Redis-process problems.
+
+## OpenTelemetry tracing (Phase 2.3)
+
+The orchestrator emits traces via OpenTelemetry/OTLP-gRPC to a
+self-hosted Grafana Tempo backend. FastAPI (every HTTP request) and
+the `requests` library (every outbound call — Ollama, ntfy, Gotify,
+NoteDiscovery) are auto-instrumented; ``log()``, ``ssh_command``, and
+the two ``query_ollama*`` LLM entrypoints have manual spans with
+domain attributes (``orchestrator.run_id``, ``llm.model``, ``llm.role``,
+``ssh.target``, etc.).
+
+Toggleable via the `otel.enabled` config flag. When disabled, every
+manual span call is zero-cost — OTel falls back to the no-op default
+TracerProvider.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| Tempo server | dedicated LXC (operator's choice — suggested LXC 204) | Debian 12 + Tempo 2.6.x single-binary from grafana.com release |
+| OTLP/gRPC | `<tempo-lxc-ip>:4317` | trace ingest endpoint; orchestrator's `OTEL_ENDPOINT` points here |
+| OTLP/HTTP | `<tempo-lxc-ip>:4318` | HTTP/JSON ingest (unused by orchestrator but available for sidecars) |
+| Query API | `<tempo-lxc-ip>:3200` | Grafana datasource + ad-hoc curl queries |
+| Storage | local-blocks at `/var/lib/tempo/blocks` (block-storage backend) | 14d retention by default; bump in `/etc/tempo/tempo.yaml` |
+| Sampling | head-based via `TraceIdRatioBased` | `otel.sample_ratio=1.0` records every trace; lower for high-volume environments |
+
+### One-time Tempo setup
+
+1. On Proxmox: create a fresh Debian 12 LXC. Suggested ID 204, 1 vCPU,
+   2 GB RAM, 10 GB disk. Bridge `vmbr0`. Static IP on the LAN
+   (e.g. `192.168.2.187`).
+2. From the Proxmox host, copy the script in and run it:
+   ```bash
+   pct push 204 /opt/ai-orchestrator/scripts/install_tempo.sh /root/install_tempo.sh
+   pct enter 204
+   bash /root/install_tempo.sh
+   ```
+   The script downloads the Tempo binary tarball from
+   `github.com/grafana/tempo/releases`, installs it to
+   `/usr/local/bin/tempo`, creates the `tempo` system user + data
+   directories, writes `/etc/tempo/tempo.yaml` (single-binary mode,
+   OTLP/gRPC :4317, OTLP/HTTP :4318, query :3200, local-blocks backend),
+   installs a systemd unit and starts it. **Pre-set** `TEMPO_VERSION`
+   to bump from the script default. Health check via `/ready` on :3200
+   takes ~5s after first start; the script polls until it returns 200.
+3. From orchestrator LXC 200, smoke-test connectivity:
+   ```bash
+   curl http://<tempo-lxc-ip>:3200/ready    # → "ready"
+   nc -z <tempo-lxc-ip> 4317                 # OTLP/gRPC reachable
+   ```
+4. Add `OTEL_ENDPOINT` to `/opt/ai-orchestrator/.env`:
+   ```
+   OTEL_ENDPOINT=<tempo-lxc-ip>:4317
+   ```
+5. Flip `otel.enabled = true` in `config.json` and restart the
+   orchestrator service. On startup, ``init_tracing(app)`` builds the
+   global TracerProvider, attaches a BatchSpanProcessor, and
+   instruments FastAPI + requests.
+6. Verify traces flow:
+   ```bash
+   # Generate some traffic
+   for i in 1 2 3 4 5; do curl -fsS http://127.0.0.1:8000/health > /dev/null; done
+   # Wait ~5s for the BatchSpanProcessor to flush, then query Tempo
+   sleep 6
+   curl 'http://<tempo-lxc-ip>:3200/api/search?tags=service.name%3Dai-orchestrator&limit=5'
+   ```
+   The response will include trace IDs with `rootServiceName=ai-orchestrator`.
+
+### Common Tempo issues
+
+- `/ready` returns 503 right after start → Tempo's ingester takes
+  ~10–30s to join the ring on first boot. Wait, then re-check.
+- `level=warn ... feature gate ID=component.UseLocalHostAsDefaultHost`
+  in journalctl → harmless. Tempo recommends explicit local-host
+  binds for production; for a homelab LXC behind a LAN-only firewall,
+  `0.0.0.0` is fine.
+- Traces present in Tempo but missing manual span attributes (e.g. no
+  `orchestrator.run_id`) → ensure the orchestrator restarted AFTER
+  `otel.enabled=true` was set; init_tracing only runs at boot.
+- Cardinality blowup → drop `otel.sample_ratio` to `0.1` (10%) to
+  reduce volume tenfold without losing the ability to investigate.
+
+### Disabling tracing
+
+Set `otel.enabled=false` in `config.json` and restart. Manual span
+sites (log, ssh_command, LLM calls) all delegate to OTel's no-op
+TracerProvider; the cost is a single attribute read per call. The
+Tempo LXC can be shut down without affecting the orchestrator.
+
+## Grafana dashboards (Phase 2.3)
+
+Grafana is the visualization layer for Phase 2.3 traces (via Tempo)
+and Phase 1.8.5 metrics (via the orchestrator's own `/metrics`
+endpoint). Datasources and dashboards are auto-provisioned by
+``scripts/install_grafana.sh`` from YAML / JSON files under
+``/etc/grafana/provisioning/`` and ``/var/lib/grafana/dashboards/``.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| Grafana server | dedicated LXC (operator's choice — suggested LXC 205) | Debian 12 + grafana-oss 12.4.3 from `apt.grafana.com` |
+| HTTP UI | `<grafana-lxc-ip>:3000` | basic-auth with admin / `<grafana-admin-password>` |
+| Tempo datasource | UID `tempo-orchestrator` | proxies queries to `<tempo-lxc-ip>:3200` |
+| Prometheus datasource | UID `prometheus-orchestrator` | proxies to orchestrator's `/metrics` (no separate Prometheus server in Phase 2.3) |
+| Per-run trace dashboard | UID `orchestrator-per-run` | TraceQL filter on `orchestrator.run_id`; paste the run_id in the textbox |
+
+### One-time Grafana setup
+
+1. On Proxmox: create a fresh Debian 12 LXC. Suggested ID 205, 1 vCPU,
+   2 GB RAM, 8 GB disk. Bridge `vmbr0`. Static IP on the LAN
+   (e.g. `192.168.2.188`).
+2. From the Proxmox host, copy the script in and run it:
+   ```bash
+   pct push 205 /opt/ai-orchestrator/scripts/install_grafana.sh /root/install_grafana.sh
+   pct enter 205
+   bash /root/install_grafana.sh
+   ```
+   The script installs `grafana=12.4.3` from `apt.grafana.com`,
+   generates a URL-safe alphanumeric admin password (printed at the
+   end — save it then), writes the password into
+   `[security].admin_password` of `grafana.ini`, removes the SQLite
+   `grafana.db` so first-boot user creation picks up the new
+   password, provisions the Tempo + Prometheus datasources, drops
+   the per-run trace lookup dashboard at
+   `/var/lib/grafana/dashboards/orchestrator/per-run-traces.json`,
+   and starts grafana-server.
+   **Pre-set** `GRAFANA_ADMIN_PASSWORD` / `TEMPO_URL` /
+   `PROMETHEUS_URL` env vars to override defaults.
+   **Why pin to 12.4.3?** Grafana 13.0.1 has a regression where
+   `grafana-cli admin reset-admin-password` writes a hash that the
+   running server rejects (verified 2026-05-07). 12.4.3 is the
+   current LTS; bump `GRAFANA_VERSION` once 13.x is fixed.
+3. From any LAN host, browse to `http://<grafana-lxc-ip>:3000` and
+   log in as `admin` / `<password>`. The "AI Orchestrator — Per-run
+   traces" dashboard appears automatically.
+4. To verify datasources via API:
+   ```bash
+   curl -u admin:<pass> http://<grafana-lxc-ip>:3000/api/datasources
+   # Should list Tempo + Prometheus.
+   curl -u admin:<pass> \
+       'http://<grafana-lxc-ip>:3000/api/datasources/proxy/uid/tempo-orchestrator/api/echo'
+   # Should return "echo" — confirms Grafana → Tempo connectivity.
+   ```
+
+### Common Grafana issues
+
+- HTTP 401 with `[password-auth.invalid] invalid password` after
+  install → the brute-force lockout kicked in OR you're hitting the
+  Grafana 13 reset-admin-password regression. Stop the service,
+  remove `/var/lib/grafana/grafana.db`, restart — first-boot user
+  creation picks up `[security].admin_password` from `grafana.ini`.
+- `too many consecutive incorrect login attempts for user — login
+  for user temporarily blocked` → 5 failed attempts triggered
+  Grafana's brute-force protection. Wait ~5min OR clear via
+  `sqlite3 /var/lib/grafana/grafana.db 'DELETE FROM login_attempt;'`
+  (admin recovery only — never a normal flow).
+- Plugin install error in journalctl
+  (`unlinkat /usr/share/grafana/data/plugins-bundled/elasticsearch:
+  read-only file system`) → harmless. The bundled-plugin
+  auto-update tries to upgrade itself but the bundle dir is
+  read-only on packaged installs. Functionality unaffected.
+- Empty trace search → confirm `otel.enabled=true` in orchestrator
+  config and traffic has flowed since the last orchestrator restart.
+  `BatchSpanProcessor` flushes on a 5s interval — wait at least 6s
+  after the last call before querying.
+
+### Disabling Grafana
+
+The Grafana LXC is a pure consumer of Tempo + the orchestrator's
+`/metrics` — shutting it down has zero impact on the orchestrator.
+`systemctl stop grafana-server` on the Grafana LXC, or `pct stop
+205` from Proxmox, both work cleanly.

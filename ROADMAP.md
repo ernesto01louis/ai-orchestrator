@@ -276,12 +276,12 @@ Ships dormant — `postgres.enabled=false` default. Operator action: stand up ne
 - [x] Move `_ws_clients` coordination to Redis pubsub (per-instance ID envelope via `_publish_ws_broadcast_to_redis`; daemon subscriber thread filters self-origin to avoid double-delivery; `pubsub.get_message(timeout=1.0)` poll loop survives idle windows)
 - [x] Move `_url_cache` and `_embed_cache` to Redis (`core/redis_cache` exposes `url_cache_get_all/store` + `embed_cache_get/set` with TTL; both fall back to today's in-process / JSON storage when Redis is disabled)
 
-### 2.3 OpenTelemetry
-- [ ] `opentelemetry-instrumentation-fastapi`
-- [ ] Self-host Tempo or Jaeger
-- [ ] Grafana reads Tempo + Prometheus
-- [ ] Wrap `log()`, `ssh_command`, LLM calls with spans
-- [ ] Per-run trace view in Grafana
+### 2.3 OpenTelemetry — DONE (v0.2.3-phase2.3)
+- [x] `opentelemetry-instrumentation-fastapi` (auto-instruments every HTTP request) + `opentelemetry-instrumentation-requests` (every outbound HTTP call gets a child span)
+- [x] Self-host Tempo on LXC 204 (`tempo-server` at 192.168.2.187, Debian 12 + Tempo 2.6.1 single-binary, OTLP/gRPC :4317, OTLP/HTTP :4318, query :3200, local-blocks 14d retention)
+- [x] Grafana on LXC 205 (`grafana-server` at 192.168.2.188, pinned to 12.4.3 — 13.0.1 has reset-admin-password regression). Auto-provisioned datasources: Tempo + Prometheus (orchestrator's `/metrics`).
+- [x] Manual spans on `log()` (span event on the active span), `ssh_command` (ssh.target/host/returncode/etc.), and the two `query_ollama*` LLM entrypoints (llm.model/role/eval_count/outcome)
+- [x] Per-run trace view in Grafana — dashboard UID `orchestrator-per-run` with TraceQL filter on `orchestrator.run_id` textbox variable
 
 ### 2.4 Budget tracking
 - [ ] Extend Campaign with `budget_used`

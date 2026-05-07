@@ -195,33 +195,51 @@ def query_ollama_api(base_url: str, endpoint: str, timeout: int = 10):
     on_failure=[on_task_completion],
 )
 def query_ollama(model, prompt, url, run_id, agent_role: str = "") -> LlmResponse:
+    from core.otel import get_tracer  # noqa: PLC0415
+    tracer = get_tracer("ai-orchestrator.llm")
     log(run_id, f"LLM request -> {model}")
-    try:
-        r = requests.post(
-            url,
-            json={"model": model, "prompt": prompt, "stream": False},
-            timeout=TIMEOUT_LLM_GENERATE,
-        )
-        r.raise_for_status()
-        envelope = r.json()
-        text = envelope.get("response", "")
-        envelope = _annotate_envelope(
-            envelope, model=model, url=url,
-            agent_role=agent_role, response_text=text,
-        )
-        return LlmResponse(text=text, envelope=envelope)
-    except requests.exceptions.Timeout:
-        log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_GENERATE}s)")
-        return LlmResponse(text="")
-    except requests.exceptions.ConnectionError as e:
-        log(run_id, f"LLM connection failed for {model}: {e}")
-        return LlmResponse(text="")
-    except requests.exceptions.HTTPError as e:
-        log(run_id, f"LLM HTTP error for {model}: {e}")
-        return LlmResponse(text="")
-    except json.JSONDecodeError as e:
-        log(run_id, f"LLM returned invalid JSON for {model}: {e}")
-        return LlmResponse(text="")
+    with tracer.start_as_current_span("llm.generate") as span:
+        span.set_attribute("llm.model", model)
+        span.set_attribute("llm.url", url)
+        span.set_attribute("llm.endpoint_kind", "generate")
+        span.set_attribute("llm.role", agent_role or "")
+        span.set_attribute("orchestrator.run_id", run_id or "")
+        try:
+            r = requests.post(
+                url,
+                json={"model": model, "prompt": prompt, "stream": False},
+                timeout=TIMEOUT_LLM_GENERATE,
+            )
+            r.raise_for_status()
+            envelope = r.json()
+            text = envelope.get("response", "")
+            span.set_attribute("llm.eval_count", int(envelope.get("eval_count", 0) or 0))
+            span.set_attribute("llm.response_chars", len(text))
+            envelope = _annotate_envelope(
+                envelope, model=model, url=url,
+                agent_role=agent_role, response_text=text,
+            )
+            return LlmResponse(text=text, envelope=envelope)
+        except requests.exceptions.Timeout as e:
+            span.set_attribute("llm.outcome", "timeout")
+            span.record_exception(e)
+            log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_GENERATE}s)")
+            return LlmResponse(text="")
+        except requests.exceptions.ConnectionError as e:
+            span.set_attribute("llm.outcome", "connection_error")
+            span.record_exception(e)
+            log(run_id, f"LLM connection failed for {model}: {e}")
+            return LlmResponse(text="")
+        except requests.exceptions.HTTPError as e:
+            span.set_attribute("llm.outcome", "http_error")
+            span.record_exception(e)
+            log(run_id, f"LLM HTTP error for {model}: {e}")
+            return LlmResponse(text="")
+        except json.JSONDecodeError as e:
+            span.set_attribute("llm.outcome", "invalid_json")
+            span.record_exception(e)
+            log(run_id, f"LLM returned invalid JSON for {model}: {e}")
+            return LlmResponse(text="")
 
 
 # ── structured chat (/api/chat with format) ────────
@@ -237,44 +255,64 @@ def query_ollama(model, prompt, url, run_id, agent_role: str = "") -> LlmRespons
 def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_id,
                              agent_role: str = "") -> LlmResponse:
     """Structured query with JSON-schema enforcement and temperature 0."""
+    from core.otel import get_tracer  # noqa: PLC0415
+    tracer = get_tracer("ai-orchestrator.llm")
     log(run_id, f"LLM structured request -> {model}")
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": user_prompt})
 
-    try:
-        r = requests.post(
-            url,
-            json={
-                "model": model,
-                "messages": messages,
-                "format": schema,
-                "stream": False,
-                "options": {"temperature": 0},
-            },
-            timeout=TIMEOUT_LLM_STRUCTURED,
-        )
-        r.raise_for_status()
-        envelope = r.json()
-        content = envelope.get("message", {}).get("content", "")
-        envelope = _annotate_envelope(
-            envelope, model=model, url=url,
-            agent_role=agent_role, response_text=content,
-        )
-        if not content:
-            log(run_id, f"structured query returned empty content from {model}")
-            return LlmResponse(envelope=envelope)
-        return LlmResponse(parsed=safe_parse_json(content, run_id, context=model), envelope=envelope)
-    except requests.exceptions.Timeout:
-        log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_STRUCTURED}s)")
-        return LlmResponse()
-    except requests.exceptions.ConnectionError as e:
-        log(run_id, f"LLM connection failed for {model}: {e}")
-        return LlmResponse()
-    except requests.exceptions.HTTPError as e:
-        log(run_id, f"LLM HTTP error for {model}: {e}")
-        return LlmResponse()
-    except json.JSONDecodeError as e:
-        log(run_id, f"LLM returned invalid response envelope for {model}: {e}")
-        return LlmResponse()
+    with tracer.start_as_current_span("llm.chat") as span:
+        span.set_attribute("llm.model", model)
+        span.set_attribute("llm.url", url)
+        span.set_attribute("llm.endpoint_kind", "chat")
+        span.set_attribute("llm.role", agent_role or "")
+        span.set_attribute("orchestrator.run_id", run_id or "")
+        span.set_attribute("llm.has_schema", schema is not None)
+        try:
+            r = requests.post(
+                url,
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "format": schema,
+                    "stream": False,
+                    "options": {"temperature": 0},
+                },
+                timeout=TIMEOUT_LLM_STRUCTURED,
+            )
+            r.raise_for_status()
+            envelope = r.json()
+            content = envelope.get("message", {}).get("content", "")
+            span.set_attribute("llm.eval_count", int(envelope.get("eval_count", 0) or 0))
+            span.set_attribute("llm.response_chars", len(content))
+            envelope = _annotate_envelope(
+                envelope, model=model, url=url,
+                agent_role=agent_role, response_text=content,
+            )
+            if not content:
+                span.set_attribute("llm.outcome", "empty_content")
+                log(run_id, f"structured query returned empty content from {model}")
+                return LlmResponse(envelope=envelope)
+            return LlmResponse(parsed=safe_parse_json(content, run_id, context=model), envelope=envelope)
+        except requests.exceptions.Timeout as e:
+            span.set_attribute("llm.outcome", "timeout")
+            span.record_exception(e)
+            log(run_id, f"LLM timeout: {model} ({TIMEOUT_LLM_STRUCTURED}s)")
+            return LlmResponse()
+        except requests.exceptions.ConnectionError as e:
+            span.set_attribute("llm.outcome", "connection_error")
+            span.record_exception(e)
+            log(run_id, f"LLM connection failed for {model}: {e}")
+            return LlmResponse()
+        except requests.exceptions.HTTPError as e:
+            span.set_attribute("llm.outcome", "http_error")
+            span.record_exception(e)
+            log(run_id, f"LLM HTTP error for {model}: {e}")
+            return LlmResponse()
+        except json.JSONDecodeError as e:
+            span.set_attribute("llm.outcome", "invalid_json")
+            span.record_exception(e)
+            log(run_id, f"LLM returned invalid response envelope for {model}: {e}")
+            return LlmResponse()
