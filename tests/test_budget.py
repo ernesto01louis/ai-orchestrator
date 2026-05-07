@@ -145,3 +145,126 @@ def test_percentage_used_normal() -> None:
 def test_percentage_used_can_exceed_100() -> None:
     """Crossings happen at exactly 100, but a runaway campaign can go higher."""
     assert budget.percentage_used(150.0, 100.0) == 150.0
+
+
+# ---------------------------------------------------------------------------
+# accrue_to_campaign — side-effecting integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def budget_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "BUDGET_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "BUDGET_THRESHOLDS_PCT", [50, 80, 100], raising=False)
+
+
+@pytest.fixture
+def patched_campaigns(
+    monkeypatch: pytest.MonkeyPatch, budget_enabled: None
+) -> dict:
+    """Install a single in-memory campaign + run, with load/save backed
+    by a captured dict so we can assert on persisted state."""
+    campaigns: dict = {
+        "c-1": {
+            "name": "test-campaign",
+            "runs": [{"run_id": "r-1", "params": {}, "status": "running", "score": 0}],
+            "budget_total_usd": 1.0,
+            "budget_used_usd": 0.0,
+            "budget_state": "ok",
+            "budget_thresholds_emitted": [],
+        }
+    }
+    saved_calls: list = []
+
+    def _fake_load() -> dict:
+        return campaigns
+
+    def _fake_save(data: dict, changed_ids: set | None = None) -> None:
+        saved_calls.append((data, changed_ids))
+
+    monkeypatch.setattr("memory_pkg.load_campaigns", _fake_load)
+    monkeypatch.setattr("memory_pkg.save_campaigns", _fake_save)
+    return {"campaigns": campaigns, "saves": saved_calls}
+
+
+def test_accrue_noop_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "BUDGET_ENABLED", False, raising=False)
+    # Should silently return — no exception, no save.
+    budget.accrue_to_campaign("r-1", 0.5)
+
+
+def test_accrue_noop_for_unknown_run(patched_campaigns: dict) -> None:
+    budget.accrue_to_campaign("does-not-exist", 0.25)
+    assert patched_campaigns["saves"] == []
+
+
+def test_accrue_below_threshold_increments_used(patched_campaigns: dict) -> None:
+    budget.accrue_to_campaign("r-1", 0.10)  # 10% of $1 budget
+    record = patched_campaigns["campaigns"]["c-1"]
+    assert record["budget_used_usd"] == pytest.approx(0.10)
+    assert record["budget_state"] == "ok"
+    assert record["budget_thresholds_emitted"] == []
+    assert len(patched_campaigns["saves"]) == 1
+
+
+def test_accrue_crosses_50_pct_threshold(
+    patched_campaigns: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    notifications: list = []
+    monkeypatch.setattr(
+        "notifications.send.send_notification",
+        lambda **k: notifications.append(k),
+    )
+    budget.accrue_to_campaign("r-1", 0.55)  # 55%
+    record = patched_campaigns["campaigns"]["c-1"]
+    assert record["budget_state"] == "warning"
+    assert record["budget_thresholds_emitted"] == [50]
+    assert len(notifications) == 1
+    assert "50%" in notifications[0]["title"]
+
+
+def test_accrue_breach_auto_pauses(
+    patched_campaigns: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Crossing 100% must promote state to ``paused`` AND flip the
+    in-process CAMPAIGN_STATUS flag."""
+    monkeypatch.setattr(
+        "notifications.send.send_notification", lambda **_k: None,
+    )
+    # Guard: avoid hitting Prefect server in tests
+    monkeypatch.setattr("prefect_io.pause_flow_run", lambda *_a, **_k: None)
+    from core.runtime import CAMPAIGN_STATUS  # noqa: PLC0415
+    CAMPAIGN_STATUS.pop("c-1", None)
+
+    budget.accrue_to_campaign("r-1", 1.05)  # 105%
+    record = patched_campaigns["campaigns"]["c-1"]
+    assert record["budget_state"] == "paused"
+    assert 100 in record["budget_thresholds_emitted"]
+    assert CAMPAIGN_STATUS.get("c-1", {}).get("paused") is True
+
+
+def test_accrue_idempotent_no_double_notify(
+    patched_campaigns: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two calls that each cross 50% should only fire one notification."""
+    notifications: list = []
+    monkeypatch.setattr(
+        "notifications.send.send_notification",
+        lambda **k: notifications.append(k),
+    )
+    budget.accrue_to_campaign("r-1", 0.55)
+    notifications.clear()
+    budget.accrue_to_campaign("r-1", 0.10)  # → 65%, still warning, same threshold list
+    assert notifications == []
+    record = patched_campaigns["campaigns"]["c-1"]
+    assert record["budget_state"] == "warning"
+    assert record["budget_thresholds_emitted"] == [50]
+
+
+def test_accrue_zero_cost_short_circuits(
+    patched_campaigns: dict,
+) -> None:
+    budget.accrue_to_campaign("r-1", 0.0)
+    assert patched_campaigns["saves"] == []
+    record = patched_campaigns["campaigns"]["c-1"]
+    assert record["budget_used_usd"] == 0.0

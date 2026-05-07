@@ -209,6 +209,11 @@ _CAMPAIGN_UPSERT_COLUMNS: tuple[str, ...] = (
     "completed_at",
     "merkle_root",
     "merkle_status",
+    # Phase 2.4 budget columns (alembic 0002_budget_tracking).
+    "budget_total_usd",
+    "budget_used_usd",
+    "budget_state",
+    "budget_thresholds_emitted",
 )
 
 

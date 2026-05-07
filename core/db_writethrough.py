@@ -110,7 +110,25 @@ def _campaign_record_to_row(
         # on-disk merkle.json — campaigns.json never carries them.
         "merkle_root": None,
         "merkle_status": None,
+        # Phase 2.4 budget columns. JSON is canonical, Postgres mirrors;
+        # ``budget_used_usd`` accrues in core.budget.accrue_to_campaign.
+        "budget_total_usd": _coerce_float_or_none(record.get("budget_total_usd")),
+        "budget_used_usd": float(record.get("budget_used_usd", 0.0) or 0.0),
+        "budget_state": str(record.get("budget_state", "ok") or "ok"),
+        "budget_thresholds_emitted": list(
+            record.get("budget_thresholds_emitted", []) or []
+        ),
     }
+
+
+def _coerce_float_or_none(v: Any) -> float | None:
+    """Helper for optional float fields — preserves NULL for empty input."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +227,11 @@ def _llm_call_record_to_row(record: Any) -> dict[str, Any]:
         "started_at": getattr(record, "started_at", None),
         "duration_ms": int(getattr(record, "duration_ms", 0) or 0),
         "response_tokens": int(getattr(record, "response_tokens", 0) or 0),
+        # Phase 2.4 budget columns. Defaults keep legacy LlmCallRecord
+        # constructors working (zero cost — same as a missing rate
+        # entry, so the row is faithful).
+        "prompt_tokens": int(getattr(record, "prompt_tokens", 0) or 0),
+        "cost_usd": float(getattr(record, "cost_usd", 0.0) or 0.0),
         "sampling": getattr(record, "sampling", {}) or {},
         "rendered_messages": getattr(record, "rendered_messages", []) or [],
         "response_text": getattr(record, "response_text", "") or "",

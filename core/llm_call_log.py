@@ -32,6 +32,12 @@ class LlmCallRecord:
     model_size_bytes: int = 0
     response_text: str = ""
     started_at: datetime | None = None
+    # Phase 2.4 budget tracking. ``prompt_tokens`` is Ollama's
+    # ``prompt_eval_count``; ``cost_usd`` is computed by
+    # ``core.budget.cost_usd_for`` in the on_task_completion hook.
+    # Both default to ``0`` so legacy constructors stay valid.
+    prompt_tokens: int = 0
+    cost_usd: float = 0.0
 
 
 class LlmCallLogger:

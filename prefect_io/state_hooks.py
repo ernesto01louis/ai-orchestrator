@@ -174,9 +174,11 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
         agent_role = str(params.get("agent_role", "") or "")
         started_at = start if hasattr(start, "tzinfo") else None
 
-        # Pull eval_count / digest / size / response_text from the LlmResponse
-        # envelope. Tolerate dicts (legacy callers / fixtures) and bare values.
+        # Pull eval_count / prompt_eval_count / digest / size / response_text
+        # from the LlmResponse envelope. Tolerate dicts (legacy callers /
+        # fixtures) and bare values.
         response_tokens = 0
+        prompt_tokens = 0
         envelope: dict[str, Any] = {}
         try:
             result = state.result(raise_on_failure=False) if callable(
@@ -191,8 +193,10 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             if candidate is None:
                 candidate = envelope.get("eval_count") or envelope.get("response_tokens")
             response_tokens = int(candidate or 0)
+            prompt_tokens = int(envelope.get("prompt_eval_count", 0) or 0)
         except Exception:
             response_tokens = 0
+            prompt_tokens = 0
             envelope = {}
 
         model_digest = str(envelope.get("_orchestrator_digest", "") or "")
@@ -205,6 +209,15 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
         # value the production code stamped into the envelope.
         if not agent_role:
             agent_role = str(envelope.get("_orchestrator_agent_role", "") or "")
+
+        # Phase 2.4: cost is rate-table × tokens. Computed once here so
+        # both the persisted LlmCall row and the per-campaign accrual
+        # step see the same value.
+        try:
+            from core.budget import cost_usd_for  # noqa: PLC0415
+            cost_usd = cost_usd_for(model, prompt_tokens, response_tokens)
+        except Exception:
+            cost_usd = 0.0
 
         record = LlmCallRecord(
             run_id=run_id,
@@ -220,6 +233,8 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
             model_size_bytes=model_size_bytes,
             response_text=response_text,
             started_at=started_at,
+            prompt_tokens=int(prompt_tokens),
+            cost_usd=float(cost_usd),
         )
         LLM_CALL_LOG.append(record)
         # Phase 2.1: eager dual-write to the llm_calls table. Failure is
@@ -228,6 +243,13 @@ def on_task_completion(task: Any, task_run: Any, state: Any) -> None:
         try:
             from core import db_writethrough
             db_writethrough.mirror_llm_call(record)
+        except Exception:
+            pass
+        # Phase 2.4: accrue cost to the parent campaign (no-op when
+        # budget tracking is disabled or the run has no campaign).
+        try:
+            from core.budget import accrue_to_campaign  # noqa: PLC0415
+            accrue_to_campaign(run_id, cost_usd)
         except Exception:
             pass
         try:

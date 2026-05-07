@@ -14,10 +14,20 @@ running ``budget_used_usd`` / ``budget_total_usd`` pair plus the list of
 already-emitted thresholds. Output is a structured ``BudgetEval``
 record describing what state the campaign should be in and which (if
 any) new threshold the caller should fire a notification for.
+
+``accrue_to_campaign`` is the single side-effecting entry point: it
+reads + writes the JSON-canonical campaign state, fires notifications
+for newly-crossed thresholds, and pauses the campaign when 100% is
+breached. Called from the on_task_completion state hook AFTER the
+LlmCall has been recorded.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 # Public state values, also enforced by the Postgres CHECK constraint
 # in alembic/versions/0002_budget_tracking.py.
@@ -129,3 +139,184 @@ def percentage_used(
     if budget_total_usd is None or budget_total_usd <= 0:
         return None
     return (budget_used_usd / budget_total_usd) * 100.0
+
+
+# ---------------------------------------------------------------------------
+# Side-effecting accrual entry point
+# ---------------------------------------------------------------------------
+
+
+def _find_campaign_for_run(
+    run_id: str, campaigns_map: dict[str, dict[str, Any]]
+) -> str | None:
+    """Scan ``campaigns_map`` for the campaign owning ``run_id``.
+
+    Linear scan over the at-most-few-thousand campaigns. Cheap enough
+    on the LLM-call path (per-call latency dominated by network) but
+    callers should still cache the lookup if they're hot.
+    """
+    for cid, record in campaigns_map.items():
+        for run in record.get("runs", []) or []:
+            if isinstance(run, dict) and run.get("run_id") == run_id:
+                return cid
+    return None
+
+
+def accrue_to_campaign(run_id: str, cost_delta: float) -> None:
+    """Apply ``cost_delta`` USD to whichever campaign owns ``run_id``.
+
+    Pipeline:
+    1. Skip when budget tracking is disabled OR ``cost_delta`` is zero.
+    2. Find the owning campaign (linear scan of ``memory/campaigns.json``).
+       Runs with no campaign are silently skipped.
+    3. Read current ``budget_used_usd`` / ``budget_total_usd`` /
+       ``budget_state`` / ``budget_thresholds_emitted``.
+    4. Add ``cost_delta`` to ``budget_used_usd``.
+    5. Re-evaluate thresholds; emit notifications for each newly-crossed
+       percentage; bump the Prometheus counter.
+    6. If the eval flags ``should_pause``, pause the campaign via the
+       same path as the manual ``/campaigns/{id}/pause`` route.
+    7. Persist the updated record back via ``save_campaigns`` (which
+       also dual-writes to Postgres in Phase 2.1 mode).
+
+    Failure-tolerant: any unexpected error logs + returns. The state
+    hook calling us must never raise out of a Prefect ``@task`` body.
+    """
+    try:
+        from core import config  # noqa: PLC0415
+    except ImportError:
+        return
+    if not config.BUDGET_ENABLED or not cost_delta:
+        return
+    try:
+        from memory_pkg import load_campaigns, save_campaigns  # noqa: PLC0415
+    except Exception as exc:
+        _logger.warning("budget_accrue_load_failed run_id=%s error=%s", run_id, exc)
+        return
+
+    try:
+        campaigns_map = load_campaigns()  # type: ignore[no-untyped-call]
+    except Exception as exc:
+        _logger.warning(
+            "budget_accrue_load_campaigns_failed run_id=%s error=%s", run_id, exc,
+        )
+        return
+
+    cid = _find_campaign_for_run(run_id, campaigns_map)
+    if cid is None:
+        return
+    record = campaigns_map[cid]
+
+    used_before = float(record.get("budget_used_usd", 0.0) or 0.0)
+    total = record.get("budget_total_usd")
+    total_f = float(total) if total is not None else None
+    emitted = list(record.get("budget_thresholds_emitted", []) or [])
+
+    used_after = used_before + float(cost_delta)
+    record["budget_used_usd"] = used_after
+
+    eval_result = evaluate_thresholds(
+        budget_used_usd=used_after,
+        budget_total_usd=total_f,
+        thresholds_pct=list(config.BUDGET_THRESHOLDS_PCT),
+        thresholds_emitted=emitted,
+    )
+    record["budget_state"] = eval_result.state
+    record["budget_thresholds_emitted"] = eval_result.thresholds_emitted
+
+    # Notifications + metrics for each newly-crossed threshold.
+    for pct in eval_result.newly_crossed:
+        _notify_threshold(cid, pct, used_after, total_f)
+        _observe_threshold(pct, eval_result.state)
+
+    # Auto-pause on 100% breach. Promote the JSON state to ``paused``
+    # AFTER the pause call succeeds so a partially-paused campaign is
+    # still visibly in ``breach`` — operators can tell which is which.
+    if eval_result.should_pause:
+        try:
+            paused = _pause_campaign(cid)
+            if paused:
+                record["budget_state"] = STATE_PAUSED
+        except Exception as exc:
+            _logger.warning(
+                "budget_pause_failed campaign_id=%s error=%s", cid, exc,
+            )
+
+    try:
+        save_campaigns(  # type: ignore[no-untyped-call]
+            campaigns_map, changed_ids={cid},
+        )
+    except Exception as exc:
+        _logger.warning(
+            "budget_accrue_save_failed campaign_id=%s error=%s", cid, exc,
+        )
+
+
+def _notify_threshold(
+    campaign_id: str, pct: int, used_usd: float, total_usd: float | None,
+) -> None:
+    """Fire a Gotify/ntfy notification for a threshold crossing.
+
+    Best-effort — notifications.send is itself failure-tolerant, but
+    we belt-and-braces the import so a missing module never blocks.
+    """
+    try:
+        from notifications.send import send_notification  # noqa: PLC0415
+    except Exception:
+        return
+    severity = "warning" if pct < 100 else "critical"
+    title = f"Budget {pct}% — {severity}"
+    total_str = f"${total_usd:.2f}" if total_usd is not None else "(no total)"
+    message = (
+        f"Campaign {campaign_id}: ${used_usd:.4f} / {total_str}. "
+        f"{'Auto-paused.' if pct >= 100 else 'Approaching budget.'}"
+    )
+    priority = 8 if pct >= 100 else 5
+    try:
+        send_notification(  # type: ignore[no-untyped-call]
+            title=title, message=message, priority=priority,
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        _logger.warning(
+            "budget_notify_failed campaign_id=%s pct=%s error=%s",
+            campaign_id, pct, exc,
+        )
+
+
+def _observe_threshold(pct: int, state: str) -> None:
+    """Bump the budget Prom counter without dragging metrics module
+    in if it's failing for any reason."""
+    try:
+        from core.metrics import observe_budget_threshold  # noqa: PLC0415
+        observe_budget_threshold(pct, state)
+    except Exception:
+        pass
+
+
+def _pause_campaign(campaign_id: str) -> bool:
+    """Pause a campaign because its budget breached 100%.
+
+    Mirrors the manual ``/campaigns/{id}/pause`` route: flips the
+    in-process ``CAMPAIGN_STATUS`` flag and signals Prefect to pause
+    the flow_run (when one is active). Returns ``True`` on success.
+    """
+    try:
+        from core.runtime import CAMPAIGN_STATUS  # noqa: PLC0415
+    except Exception:
+        return False
+    CAMPAIGN_STATUS.setdefault(campaign_id, {})["paused"] = True
+
+    try:
+        from prefect_io import pause_flow_run  # noqa: PLC0415
+    except Exception:
+        return True  # in-process flag flip already succeeded
+    try:
+        flow_run_id = CAMPAIGN_STATUS.get(campaign_id, {}).get("flow_run_id")
+        if flow_run_id:
+            pause_flow_run(flow_run_id)
+    except Exception as exc:  # pragma: no cover — Prefect-down fallback
+        _logger.warning(
+            "budget_pause_prefect_failed campaign_id=%s error=%s",
+            campaign_id, exc,
+        )
+    return True
