@@ -81,3 +81,53 @@ jobs:
       - name: Show Prefect server log on failure
         if: failure()
         run: tail -200 prefect-server.log || true
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orchestrator
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: orchestrator
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orchestrator"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_DSN: postgresql://orchestrator:testpass@localhost:5432/orchestrator
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-mock httpx
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if python -c "import psycopg; psycopg.connect('${POSTGRES_DSN}', connect_timeout=2).close()" 2>/dev/null; then
+              echo "Postgres up after ${i}s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres never became ready" >&2
+          exit 1
+
+      - name: Apply Alembic migrations
+        run: alembic upgrade head
+
+      - name: Run postgres_real tests
+        run: pytest -q -m postgres_real
