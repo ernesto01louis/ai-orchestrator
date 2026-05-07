@@ -1,0 +1,25 @@
+# requirements-cloud.txt — opt-in extras for Phase 2.5 SkyPilot
+# cloud-burst GPU.
+#
+# Why a separate file? SkyPilot's dependency tree (boto3, casbin,
+# pandas, lxml, etc.) conflicts with several exact pins in
+# ``requirements.txt`` (click, typer, uvicorn, rocrate, pyiceberg).
+# Carrying skypilot in the main file would block ``pip install -r
+# requirements.txt`` on a fresh CI runner. Splitting keeps the base
+# install reproducible and lets operators who want cloud-burst run::
+#
+#     pip install -r requirements-cloud.txt
+#
+# Without this file installed:
+# * ``core/sky.py``'s lazy-import returns None.
+# * ``core.sky.is_enabled()`` reports False regardless of config.
+# * Every burst route returns 503.
+# * The orchestrator boots fine; tests pass (they MagicMock the SDK).
+#
+# After installing, set provider creds (``RUNPOD_API_KEY`` etc.),
+# run ``sky check``, then flip ``sky.enabled=true`` in ``config.json``.
+
+# Range pin with [runpod,vast] extras. Transitive resolution lets pip
+# pick boto3 / pandas / lxml versions compatible with the rest of the
+# environment.
+skypilot[runpod,vast]>=0.12,<0.13

@@ -139,3 +139,15 @@ dvc[ssh]>=3.67,<4
 # without a separate dependency. Alembic for migrations.
 psycopg[binary,pool]>=3.2,<4
 alembic>=1.13,<2
+
+# Phase 2.5 — SkyPilot for cloud-burst GPU is OPT-IN. Lives in
+# ``requirements-cloud.txt`` because its dep tree (boto3 / pandas /
+# casbin / lxml / etc.) conflicts with several exact pins above
+# (click, typer, uvicorn, rocrate, pyiceberg). Operators who want
+# cloud-burst run::
+#
+#     pip install -r requirements-cloud.txt
+#
+# Without that, ``core/sky.py``'s lazy-import returns None and
+# ``is_enabled()`` reports False — the orchestrator boots fine and
+# every burst route returns 503.

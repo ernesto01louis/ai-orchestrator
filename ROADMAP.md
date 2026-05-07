@@ -291,12 +291,14 @@ Ships dormant — `postgres.enabled=false` default. Operator action: stand up ne
 - [x] Auto-pause on 100% — when 100% is newly crossed, `core.budget._pause_campaign` flips `CAMPAIGN_STATUS[cid]["paused"]=True` and asks Prefect to pause the active flow_run; campaign state promotes to `paused` (visibly distinct from `breach`)
 - [x] `GET /campaigns/{id}/budget` route returns the running summary; tested via the session-scoped `inprocess_client` fixture
 
-### 2.5 SkyPilot for cloud-burst GPU
-- [ ] `pip install skypilot[runpod,vast]`
-- [ ] YAML specs in `sky/`
-- [ ] `POST /runs/{id}/burst`
-- [ ] Cost tracking hooks into 2.4
-- [ ] Auto `sky stop` + idle-timeout failsafe
+### 2.5 SkyPilot for cloud-burst GPU — DONE (v0.2.5-phase2.5, dormant ship)
+- [x] `pip install skypilot[runpod,vast]` — pinned in `requirements.txt` (range pin `>=0.12,<0.13` with provider extras; lazy-imported via `_try_import_sky` so operators who skip the install still get a clean disabled state)
+- [x] YAML specs in `sky/` — `llm-burst.yaml` (Ollama on a GPU, long-running with idle-stop) + `torch-eval.yaml` (PyTorch one-shot, terminates on completion)
+- [x] `POST /runs/{id}/burst` route — body validates `spec_name` + `estimated_cost_usd`, builds `BurstRequest`, calls `core.sky.launch_burst`, registers handle. Companion `GET /runs/{id}/bursts` and `POST /runs/{id}/bursts/{cluster}/stop` routes
+- [x] Cost tracking hooks into 2.4 — `core.sky.cost_report_for_cluster` queries the SkyPilot CLI's `cost_report` (falls back to the registered estimate when unavailable); both the manual stop route AND the idle-stop daemon accrue actual cost via `core.budget.accrue_to_campaign`
+- [x] Auto `sky stop` + idle-timeout failsafe — `core.sky.start_idle_stop_daemon` polls every minute, parses `last_use`, stops clusters past `sky.idle_timeout_minutes`. `timeout=0` disables. Per-burst ceiling at launch (`sky.max_burst_cost_usd`) is the second safety net; per-campaign budget breach (Phase 2.4) is the third
+
+Ships **dormant** (`sky.enabled=false` default). Operator action: configure provider creds (e.g. `RUNPOD_API_KEY`), run `sky check`, flip `sky.enabled=true`, restart orchestrator.
 
 ### 2.6 New UI
 - [ ] Framework decision (React/Vue/Svelte)

@@ -166,3 +166,13 @@ BUDGET_RATES = {
     for name, rate in _settings.budget.rates_per_million_tokens.items()
 }
 BUDGET_THRESHOLDS_PCT = list(_settings.budget.thresholds_pct)
+
+# Phase 2.5 SkyPilot cloud-burst. All ships dormant — operators set
+# provider creds (e.g. RUNPOD_API_KEY) in .env and flip
+# ``sky.enabled=true`` to activate.
+SKY_ENABLED = _settings.sky.enabled
+SKY_DEFAULT_CLOUD = _settings.sky.default_cloud
+SKY_DEFAULT_ACCELERATOR = _settings.sky.default_accelerator
+SKY_YAML_DIR = _settings.sky.yaml_dir
+SKY_IDLE_TIMEOUT_MINUTES = _settings.sky.idle_timeout_minutes
+SKY_MAX_BURST_COST_USD = _settings.sky.max_burst_cost_usd

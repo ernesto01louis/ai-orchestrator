@@ -1,0 +1,46 @@
+# sky/llm-burst.yaml — Phase 2.5 generic LLM cloud-burst spec.
+#
+# Provisions a single-GPU instance, installs Ollama, pulls the
+# requested model, and exposes the API on :11434 inside the SkyPilot-
+# managed cluster. The orchestrator's ``POST /runs/{id}/burst`` route
+# loads this file by name (``spec_name="llm-burst"``) and overrides
+# ``resources.accelerators`` + envs at launch time.
+#
+# Defaults assume RunPod (matches ``sky.default_cloud=runpod`` in
+# config.json); operator-supplied overrides win.
+
+name: ai-orchestrator-llm-burst
+
+resources:
+  accelerators: A10:1
+  disk_size: 80
+  # cloud is set at launch time from sky.default_cloud or req.cloud
+  use_spot: false
+
+# envs are overridden by the orchestrator at launch time. ``OLLAMA_MODEL``
+# defaults to a small model so a misconfigured launch doesn't spin up
+# a 70B-class download by accident.
+envs:
+  OLLAMA_MODEL: qwen2.5:7b
+  ORCHESTRATOR_RUN_ID: unset
+
+setup: |
+  set -euo pipefail
+  # Ollama install (ships a single static binary, no GPU drivers
+  # needed beyond what RunPod / Vast provide in their base images).
+  curl -fsSL https://ollama.com/install.sh | sh
+  systemctl --user start ollama || ollama serve &
+  sleep 5
+  # Pull the requested model. The orchestrator overrides
+  # ``OLLAMA_MODEL`` at launch time via env_overrides; the default
+  # above is a small model so an empty override doesn't blow disk.
+  ollama pull "${OLLAMA_MODEL}"
+
+run: |
+  set -euo pipefail
+  echo "ai-orchestrator burst ready: model=${OLLAMA_MODEL} run_id=${ORCHESTRATOR_RUN_ID}"
+  # Keep the cluster alive — the orchestrator's idle-stop daemon
+  # (Phase 2.5.4) handles termination based on activity / age. The
+  # consumer project's own task should connect via the SkyPilot-
+  # exposed endpoint and drive the LLM calls.
+  ollama serve

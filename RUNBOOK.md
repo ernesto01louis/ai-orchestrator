@@ -961,3 +961,108 @@ The Grafana LXC is a pure consumer of Tempo + the orchestrator's
 `/metrics` — shutting it down has zero impact on the orchestrator.
 `systemctl stop grafana-server` on the Grafana LXC, or `pct stop
 205` from Proxmox, both work cleanly.
+
+## SkyPilot cloud-burst (Phase 2.5)
+
+For workloads that exceed the homelab GPU budget — large-batch
+fine-tunes, multi-GPU evals, peak demand — the orchestrator can
+spin up a cloud GPU on demand via [SkyPilot]. Ships **dormant by
+default**: even with the SDK installed, no provisioning happens
+until you flip `sky.enabled=true` AND configure a cloud provider.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| SkyPilot SDK | orchestrator LXC 200 (already in `requirements.txt`) | wrapped by `core/sky.py` |
+| YAML specs | `sky/*.yaml` (git-tracked) | `llm-burst.yaml` (Ollama on a GPU) + `torch-eval.yaml` (PyTorch one-shot) |
+| Provider creds | `~/.runpod/api_key.toml` or `RUNPOD_API_KEY` env (RunPod) / `~/.config/vastai/vast_api_key` (Vast) | stays out of `config.json` |
+| Burst route | `POST /runs/{id}/burst` | accepts `spec_name` + optional overrides |
+| Idle failsafe | background daemon (Phase 2.5.4) | stops clusters with no activity for `idle_timeout_minutes` |
+| Cost ceiling | `sky.max_burst_cost_usd` per burst + Phase 2.4 budget aggregate per campaign | both enforced before launch |
+
+### One-time setup (operator)
+
+1. Pick a provider — RunPod is the typical default for spot GPU.
+   Sign up, generate an API key.
+2. Drop the key in the location SkyPilot expects:
+   ```bash
+   # RunPod
+   mkdir -p ~/.runpod
+   cat > ~/.runpod/api_key.toml <<'EOF'
+   api_key = "rpa_..."
+   EOF
+   chmod 600 ~/.runpod/api_key.toml
+   # Vast.ai
+   mkdir -p ~/.config/vastai
+   echo 'YOUR_API_KEY' > ~/.config/vastai/vast_api_key
+   chmod 600 ~/.config/vastai/vast_api_key
+   ```
+3. Verify SkyPilot recognises the credentials:
+   ```bash
+   cd /opt/ai-orchestrator && source venv/bin/activate
+   sky check
+   # Expected: at least one cloud reports "✓ enabled"
+   ```
+4. Flip `sky.enabled = true` in `config.json` and restart the
+   orchestrator.
+5. Test-launch the smallest spec to confirm wiring:
+   ```bash
+   curl -X POST http://127.0.0.1:8000/runs/<run-id>/burst \
+       -H 'Content-Type: application/json' \
+       -d '{"spec_name": "llm-burst", "estimated_cost_usd": 0.50}'
+   ```
+
+### Built-in YAML specs
+
+- **`sky/llm-burst.yaml`** — provisions a single GPU, installs Ollama,
+  pulls `${OLLAMA_MODEL}` (override via env), serves on :11434. The
+  consumer's own task connects to the SkyPilot-exposed endpoint and
+  drives LLM calls. Idle-stop applies.
+- **`sky/torch-eval.yaml`** — one-shot PyTorch eval. Installs
+  torch+torchvision+torchaudio, downloads the `EVAL_SCRIPT_URL`,
+  runs it, exits. SkyPilot tears the cluster down on completion (no
+  idle window).
+
+Add new specs to `sky/` and they're available to the burst route by
+basename. Specs follow the standard SkyPilot YAML schema; see
+[docs.skypilot.co/en/latest/reference/yaml-spec.html](https://docs.skypilot.co/en/latest/reference/yaml-spec.html).
+
+### Cost discipline
+
+Two ceilings stack to bound risk:
+
+1. **Per-burst** — `sky.max_burst_cost_usd` rejects launches whose
+   ``estimated_cost_usd`` exceeds the ceiling. The route caller
+   computes the estimate from accelerator + expected wall-clock.
+2. **Per-campaign** — Phase 2.4 budget tracking accrues the burst's
+   actual cost (via `sky cost-report`) into
+   `campaigns.budget_used_usd` once the cluster terminates. If the
+   campaign breaches 100%, the burst's parent run gets paused along
+   with the campaign.
+
+The idle-stop daemon (Phase 2.5.4) is the third safety net: any
+cluster that goes `idle_timeout_minutes` without activity gets
+`sky stop`-ed automatically.
+
+### Common SkyPilot issues
+
+- `sky check` reports no clouds enabled → API key file is in the
+  wrong location or wrong format. Re-read the provider's section in
+  the SkyPilot docs.
+- Burst stuck in `INIT` for >10 min → provider has no spot capacity
+  for the requested accelerator. Switch to on-demand
+  (`use_spot: false` in the YAML — already the default) or pick a
+  different accelerator.
+- Cluster appears in `sky status` but the orchestrator's `list_active_
+  bursts` is empty → ran `sky launch` directly outside the
+  orchestrator. The idle-stop daemon only manages clusters whose
+  names match orchestrator-owned prefixes; manual clusters are
+  invisible.
+
+### Disabling cloud-burst
+
+Flip `sky.enabled = false` in `config.json` and restart. Already-
+running clusters keep running (we don't auto-tear-down on disable —
+operators manually `sky down` them). Future launch attempts return
+503.

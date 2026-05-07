@@ -297,6 +297,54 @@ def test_core_config_exposes_redis_constants() -> None:
     assert isinstance(cfg.REDIS_RUN_STATUS_TTL, int)
 
 
+def test_missing_optional_sky_block_uses_defaults() -> None:
+    """Phase 2.5: omitting 'sky' must yield enabled=False (dormant)."""
+    raw = _load_example()
+    raw.pop("sky", None)
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.sky.enabled is False
+    assert settings.sky.default_cloud == "runpod"
+    assert settings.sky.default_accelerator == "A10:1"
+    assert settings.sky.idle_timeout_minutes == 30
+    assert settings.sky.max_burst_cost_usd == 5.0
+
+
+def test_sky_block_in_example_parses_to_disabled() -> None:
+    """The 'sky' block in config.example.json must default to disabled."""
+    raw = _load_example()
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.sky.enabled is False
+
+
+def test_sky_enabled_with_overrides_parses() -> None:
+    """A configured sky block parses end-to-end."""
+    raw = _load_example()
+    raw["sky"] = {
+        "enabled": True,
+        "default_cloud": "vast",
+        "default_accelerator": "A100:1",
+        "yaml_dir": "/opt/ai-orchestrator/sky",
+        "idle_timeout_minutes": 15,
+        "max_burst_cost_usd": 10.0,
+    }
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.sky.enabled is True
+    assert settings.sky.default_cloud == "vast"
+    assert settings.sky.idle_timeout_minutes == 15
+
+
+def test_core_config_exposes_sky_constants() -> None:
+    """core.config must export the SKY_* derived constants."""
+    import core.config as cfg  # noqa: PLC0415
+
+    assert hasattr(cfg, "SKY_ENABLED")
+    assert hasattr(cfg, "SKY_DEFAULT_CLOUD")
+    assert hasattr(cfg, "SKY_DEFAULT_ACCELERATOR")
+    assert hasattr(cfg, "SKY_YAML_DIR")
+    assert hasattr(cfg, "SKY_IDLE_TIMEOUT_MINUTES")
+    assert hasattr(cfg, "SKY_MAX_BURST_COST_USD")
+
+
 def test_missing_optional_otel_block_uses_defaults() -> None:
     """Phase 2.3: omitting 'otel' must yield enabled=False (dormant)."""
     raw = _load_example()
