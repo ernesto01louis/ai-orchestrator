@@ -2139,6 +2139,39 @@ def get_campaign(campaign_id: str):
     return _campaign_or_404(campaign_id)
 
 
+@router.get("/campaigns/{campaign_id}/budget")
+def get_campaign_budget(campaign_id: str):
+    """Phase 2.4 budget summary for a campaign.
+
+    Returns the running ``budget_used_usd``, the operator-set
+    ``budget_total_usd`` (or ``None`` for unlimited), the percentage
+    consumed (or ``None`` when no total is set), the ``budget_state``,
+    and the list of percentage thresholds that have already fired
+    notifications. ``budget.enabled`` from config is reflected so
+    operators don't have to look in two places to know whether
+    accruals are happening.
+    """
+    from core import budget as _budget  # noqa: PLC0415
+    from core import config as _config  # noqa: PLC0415
+
+    campaign = _campaign_or_404(campaign_id)
+    used = float(campaign.get("budget_used_usd", 0.0) or 0.0)
+    total_raw = campaign.get("budget_total_usd")
+    total: float | None = float(total_raw) if total_raw is not None else None
+    return {
+        "campaign_id": campaign_id,
+        "enabled": bool(_config.BUDGET_ENABLED),
+        "budget_used_usd": used,
+        "budget_total_usd": total,
+        "percentage_used": _budget.percentage_used(used, total),
+        "budget_state": str(campaign.get("budget_state", "ok") or "ok"),
+        "thresholds_emitted": list(
+            campaign.get("budget_thresholds_emitted", []) or []
+        ),
+        "thresholds_pct": list(_config.BUDGET_THRESHOLDS_PCT),
+    }
+
+
 @router.get("/campaigns/{campaign_id}/tree")
 def get_campaign_tree(campaign_id: str):
     """Tree view: campaign + per-run children with live phase merged in."""
