@@ -564,18 +564,88 @@ reconcile-on-startup heals any gap. Toggleable via the
 
 The default cron writes dumps to `/var/backups/postgres/` on the
 Postgres LXC's local disk. **This is not "independent" yet** — a disk
-failure on that LXC takes both the live database and its backups. To
-restore the independence property called out in ROADMAP.md:
+failure on that LXC takes both the live database and its backups. The
+production setup adds an SSH-based off-site rsync to TrueNAS using a
+dedicated keypair, mirroring the Phase 1.4 DVC trust pattern (no NFS
+or SMB share needed).
 
-- Mount NFS or SMB from TrueNAS at `/mnt/nas-pgbackup/` on the Postgres
-  LXC (TrueNAS UI → Sharing → NFS Shares → add an export for
-  `f3/orchestrator-pgbackup`, mode `0750`, owner `postgres`).
-- Edit `/etc/cron.daily/orchestrator-pgdump` and set
-  `BACKUP_DIR=/mnt/nas-pgbackup`. The script honors the override.
-- Verify the next-day cron run leaves a dump under
-  `/mnt/nas-pgbackup/orchestrator-*.dump` and that
-  `find /var/backups/postgres -name 'orchestrator-*.dump' -mtime -1`
-  returns nothing.
+**Setup as ofRunbook 2026-05-07** (LXC 202 → TrueNAS):
+
+1. **Install rsync on the Postgres LXC** (omitted from the bootstrap):
+   ```bash
+   pct exec 202 -- apt-get install -y rsync
+   ```
+2. **Generate a dedicated keypair on the Postgres LXC** (separate from
+   any other key — easy to revoke):
+   ```bash
+   pct exec 202 -- ssh-keygen -t ed25519 -N "" \
+       -C "postgres-server-pgbackup@$(date -u +%Y-%m-%d)" \
+       -f /root/.ssh/id_ed25519_pgbackup
+   ```
+3. **Append the pubkey to dvc-orchestrator's authorized_keys on
+   TrueNAS** (run from the orchestrator LXC, which already has the
+   Phase 1.4 DVC key):
+   ```bash
+   PUBKEY=$(pct exec 202 -- cat /root/.ssh/id_ed25519_pgbackup.pub)
+   ssh -i /root/.ssh/id_ed25519_dvc dvc-orchestrator@192.168.2.222 \
+       "grep -qF '$PUBKEY' ~/.ssh/authorized_keys || echo '$PUBKEY' >> ~/.ssh/authorized_keys"
+   ```
+   And create the destination directory:
+   ```bash
+   ssh -i /root/.ssh/id_ed25519_dvc dvc-orchestrator@192.168.2.222 \
+       "mkdir -p ~/pgbackup"
+   ```
+4. **Prime the Postgres LXC's known_hosts** so the cron's
+   `BatchMode=yes` SSH won't bail on first contact:
+   ```bash
+   pct exec 202 -- bash -c \
+       'ssh-keyscan -t ed25519 192.168.2.222 >> /root/.ssh/known_hosts'
+   ```
+5. **Replace `/etc/cron.daily/orchestrator-pgdump`** on the Postgres
+   LXC with the off-site version. Local retention 7 days, TrueNAS
+   retention 30 days. Both are configurable via env-var prefixes.
+   ```bash
+   cat > /tmp/orchestrator-pgdump <<'CRON'
+   #!/bin/sh
+   set -eu
+   LOCAL_DIR="${BACKUP_DIR:-/var/backups/postgres}"
+   REMOTE_USER="${PGBACKUP_REMOTE_USER:-dvc-orchestrator}"
+   REMOTE_HOST="${PGBACKUP_REMOTE_HOST:-192.168.2.222}"
+   REMOTE_DIR="${PGBACKUP_REMOTE_DIR:-/mnt/f3/dvc-orch-home/dvc-orchestrator/pgbackup}"
+   SSH_KEY="${PGBACKUP_SSH_KEY:-/root/.ssh/id_ed25519_pgbackup}"
+   TS="$(date -u +%Y%m%d-%H%M%S)"
+   DUMP="${LOCAL_DIR}/orchestrator-${TS}.dump"
+   mkdir -p "$LOCAL_DIR"
+   sudo -u postgres pg_dump --format=custom --compress=9 \
+       --file="$DUMP" orchestrator
+   rsync -a -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=accept-new -o BatchMode=yes" \
+       "$DUMP" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/" \
+       || echo "[orchestrator-pgdump] WARN: rsync to TrueNAS failed; local copy at $DUMP" >&2
+   find "$LOCAL_DIR" -name 'orchestrator-*.dump' -mtime +7 -delete
+   ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes \
+       "${REMOTE_USER}@${REMOTE_HOST}" \
+       "find '$REMOTE_DIR' -name 'orchestrator-*.dump' -mtime +30 -delete" \
+       || true
+   CRON
+   pct push 202 /tmp/orchestrator-pgdump /etc/cron.daily/orchestrator-pgdump
+   pct exec 202 -- chmod 0755 /etc/cron.daily/orchestrator-pgdump
+   ```
+6. **Run it once manually** to verify:
+   ```bash
+   pct exec 202 -- bash /etc/cron.daily/orchestrator-pgdump
+   ssh -i /root/.ssh/id_ed25519_dvc dvc-orchestrator@192.168.2.222 \
+       'ls -la ~/pgbackup/'
+   ```
+   You should see a fresh `orchestrator-<timestamp>.dump` of ~100 KB+.
+
+The off-site copy is what survives an LXC-disk failure or a Proxmox
+host loss; the local copy is for fast restores. Each side has its own
+retention to keep the local LXC slim while keeping a full month of
+history off-site.
+
+Restore: `scp` the dump from TrueNAS back to the Postgres LXC, then
+`pg_restore --no-owner --dbname=orchestrator <dump>`. See "Restoring
+from a pg_dump" below.
 
 ### Common Postgres issues
 
