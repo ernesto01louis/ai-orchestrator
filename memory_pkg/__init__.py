@@ -81,8 +81,26 @@ def load_campaigns():
     """Load campaigns map keyed by campaign_id (Phase 1.1)."""
     return locked_read_json(CAMPAIGNS_FILE, {})
 
-def save_campaigns(data):
+def save_campaigns(data, changed_ids=None):
+    """Persist the campaigns map to JSON, then mirror to Postgres (Phase 2.1).
+
+    JSON stays canonical. ``changed_ids`` scopes the Postgres dual-write
+    to the campaigns the caller actually mutated; when ``None`` (the
+    default — used by reconcile-on-startup), every campaign in the map
+    is upserted.
+
+    A Postgres failure is logged + swallowed inside db_writethrough; the
+    JSON write must complete first or the dual-write is skipped.
+    """
     locked_write_json(CAMPAIGNS_FILE, data)
+    try:
+        # Lazy import — most memory_pkg consumers don't need core.db.
+        from core import db_writethrough
+        db_writethrough.mirror_campaigns(data, changed_ids=changed_ids)
+    except Exception:
+        # mirror_campaigns already swallows; this catch covers a stray
+        # import-time error so save_campaigns never raises.
+        pass
 
 
 # ------------------------------------------------

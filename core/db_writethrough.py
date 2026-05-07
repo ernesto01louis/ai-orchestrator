@@ -1,0 +1,185 @@
+"""Phase 2.1 Postgres write-through chokepoint.
+
+Every dual-write callsite goes through one of these ``mirror_*``
+functions instead of touching ``core.db`` directly. Centralising the
+policy here means the failure semantics and observability are
+consistent across every JSON-canonical write in the codebase.
+
+Policy (per the Phase 2.1 plan):
+
+1. **JSON first, Postgres second.** Callers must have already written
+   the JSON file by the time they call us. We never raise.
+2. **No-op when disabled.** ``core.db.is_enabled()`` is the gate. With
+   ``postgres.enabled=false`` (the default), every mirror_* function
+   returns immediately, no DB connection attempted.
+3. **Swallow on failure.** Postgres unreachable / SQL error / timeout
+   → log a structured WARN and return. JSON is canonical, reconcile
+   on next startup heals the gap. We never propagate exceptions out
+   of a Prefect ``@task`` body via this path (matches obs 180).
+4. **Statement timeout.** Inherited from ``core.db.get_session``,
+   bounded to ``postgres.statement_timeout_ms`` so a sluggish DB can't
+   stall callers.
+
+Phase 2.1.13 hooks Prometheus counters to the WARN path so dashboards
+can see writethrough failures without grepping logs.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from typing import Any
+
+from core import db, db_models
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Conversion helpers (JSON shape → DAO input shape)
+# ---------------------------------------------------------------------------
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    """Parse an ISO-format timestamp tolerantly. Returns None on falsy
+    input. Strings without a timezone are interpreted as UTC."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _run_snapshot_to_row(run_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Convert a RUN_STATUS snapshot (passed to _persist_run_index) into
+    upsert_run input. Only fields present in the snapshot are forwarded;
+    ``manifest_sha256`` is always NULL on dual-write — reconcile fills
+    it later from the on-disk manifest.json.
+    """
+    err = snapshot.get("error")
+    return {
+        "run_id": run_id,
+        "project": snapshot.get("project", "") or "",
+        "target": snapshot.get("target", "") or "",
+        "phase": snapshot.get("phase", "completed") or "completed",
+        "score": float(snapshot.get("score") or 0),
+        "completed": True,
+        "has_error": err is not None,
+        "error_msg": (str(err)[:200] if err else None),
+        "manifest_status": snapshot.get("manifest_status"),
+        "completed_at": _utcnow(),
+    }
+
+
+def _campaign_record_to_row(
+    campaign_id: str, record: dict[str, Any]
+) -> dict[str, Any]:
+    """Convert a campaigns.json record into upsert_campaign input.
+
+    Authoritative ``campaign_id`` is the dict key, not the record's
+    ``id`` field — they normally agree, but the key wins.
+    """
+    return {
+        "campaign_id": campaign_id,
+        "name": record.get("name", "") or "",
+        "description": record.get("description"),
+        "hypothesis": record.get("hypothesis", "") or "",
+        "status": record.get("status", "queued") or "queued",
+        "template": record.get("template") or {},
+        "params": record.get("params") or {},
+        "max_runs": record.get("max_runs"),
+        "parallelism": int(record.get("parallelism", 1) or 1),
+        "created_at": _parse_iso(record.get("created_at")) or _utcnow(),
+        "started_at": _parse_iso(record.get("started_at")),
+        "completed_at": _parse_iso(record.get("completed_at")),
+        # merkle_root / merkle_status fill via reconcile from the
+        # on-disk merkle.json — campaigns.json never carries them.
+        "merkle_root": None,
+        "merkle_status": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public mirror_* entry points
+# ---------------------------------------------------------------------------
+
+
+def mirror_run_completion(run_id: str, snapshot: dict[str, Any]) -> None:
+    """Mirror a completed run into the runs table.
+
+    Called from ``core.runtime._persist_run_index`` AFTER the JSON
+    file write succeeds. Failures here log + return.
+    """
+    if not db.is_enabled():
+        return
+    try:
+        row = _run_snapshot_to_row(run_id, snapshot)
+        with db.get_session() as session:
+            db_models.upsert_run(session, row)
+    except Exception as exc:
+        log.warning(
+            "postgres_writethrough_failed",
+            extra={
+                "table": "runs",
+                "run_id": run_id,
+                "error": repr(exc),
+            },
+        )
+
+
+def mirror_campaigns(
+    campaigns_map: dict[str, dict[str, Any]],
+    changed_ids: set[str] | None = None,
+) -> None:
+    """Mirror selected campaigns into the campaigns table.
+
+    Called from ``memory_pkg.save_campaigns`` AFTER the JSON file write
+    succeeds. ``changed_ids`` scopes the upserts to the campaigns the
+    caller actually modified — passing ``None`` means "upsert every
+    campaign in the map", which is what the reconciler uses for a
+    full sweep but is wasteful on the hot path.
+    """
+    if not db.is_enabled():
+        return
+    keys: set[str] = (
+        set(campaigns_map.keys()) if changed_ids is None else set(changed_ids)
+    )
+    if not keys:
+        return
+    try:
+        with db.get_session() as session:
+            for cid in keys:
+                record = campaigns_map.get(cid)
+                if record is None:
+                    continue
+                row = _campaign_record_to_row(cid, record)
+                db_models.upsert_campaign(session, row)
+    except Exception as exc:
+        log.warning(
+            "postgres_writethrough_failed",
+            extra={
+                "table": "campaigns",
+                "changed_ids": sorted(keys),
+                "error": repr(exc),
+            },
+        )
+
+
+__all__ = [
+    "mirror_campaigns",
+    "mirror_run_completion",
+]

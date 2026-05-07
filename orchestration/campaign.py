@@ -133,7 +133,7 @@ def run_campaign(campaign_id: str) -> None:
     _set_campaign_phase(campaign_id, "running")
     campaigns[campaign_id]["status"] = "running"
     campaigns[campaign_id]["updated_at"] = _utcnow_iso()
-    save_campaigns(campaigns)
+    save_campaigns(campaigns, changed_ids={campaign_id})
     _safe_vault_write(campaigns[campaign_id])
 
     template = campaigns[campaign_id]["template"]
@@ -195,7 +195,7 @@ def run_campaign(campaign_id: str) -> None:
         campaigns[campaign_id]["status"] = final_status
         campaigns[campaign_id]["completed_at"] = _utcnow_iso()
         campaigns[campaign_id]["updated_at"] = _utcnow_iso()
-        save_campaigns(campaigns)
+        save_campaigns(campaigns, changed_ids={campaign_id})
         _safe_vault_write(campaigns[campaign_id])
         _safe_emit_evidence.submit(campaign_id).result(raise_on_failure=False)
 
@@ -263,6 +263,6 @@ def _record_run(
         entry["error"] = error
     campaigns[campaign_id].setdefault("runs", []).append(entry)
     campaigns[campaign_id]["updated_at"] = _utcnow_iso()
-    save_campaigns(campaigns)
+    save_campaigns(campaigns, changed_ids={campaign_id})
     _safe_vault_write(campaigns[campaign_id])
     _safe_emit_evidence.submit(campaign_id).result(raise_on_failure=False)

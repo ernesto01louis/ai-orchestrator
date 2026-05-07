@@ -2089,7 +2089,7 @@ def create_campaign(req: CampaignCreate):
     }
     campaigns = load_campaigns()
     campaigns[campaign_id] = record
-    save_campaigns(campaigns)
+    save_campaigns(campaigns, changed_ids={campaign_id})
 
     with _campaign_status_lock:
         CAMPAIGN_STATUS[campaign_id] = {
