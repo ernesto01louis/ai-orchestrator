@@ -788,3 +788,91 @@ independence.
   designed failure mode. Check the orchestrator's structured WARN logs
   for `redis_*` lines, then `redis-cli -h <lxc-ip> -a <pass> ping` from
   LXC 200 to isolate networking vs. Redis-process problems.
+
+## OpenTelemetry tracing (Phase 2.3)
+
+The orchestrator emits traces via OpenTelemetry/OTLP-gRPC to a
+self-hosted Grafana Tempo backend. FastAPI (every HTTP request) and
+the `requests` library (every outbound call — Ollama, ntfy, Gotify,
+NoteDiscovery) are auto-instrumented; ``log()``, ``ssh_command``, and
+the two ``query_ollama*`` LLM entrypoints have manual spans with
+domain attributes (``orchestrator.run_id``, ``llm.model``, ``llm.role``,
+``ssh.target``, etc.).
+
+Toggleable via the `otel.enabled` config flag. When disabled, every
+manual span call is zero-cost — OTel falls back to the no-op default
+TracerProvider.
+
+### Topology
+
+| Component | Where | Notes |
+|---|---|---|
+| Tempo server | dedicated LXC (operator's choice — suggested LXC 204) | Debian 12 + Tempo 2.6.x single-binary from grafana.com release |
+| OTLP/gRPC | `<tempo-lxc-ip>:4317` | trace ingest endpoint; orchestrator's `OTEL_ENDPOINT` points here |
+| OTLP/HTTP | `<tempo-lxc-ip>:4318` | HTTP/JSON ingest (unused by orchestrator but available for sidecars) |
+| Query API | `<tempo-lxc-ip>:3200` | Grafana datasource + ad-hoc curl queries |
+| Storage | local-blocks at `/var/lib/tempo/blocks` (block-storage backend) | 14d retention by default; bump in `/etc/tempo/tempo.yaml` |
+| Sampling | head-based via `TraceIdRatioBased` | `otel.sample_ratio=1.0` records every trace; lower for high-volume environments |
+
+### One-time Tempo setup
+
+1. On Proxmox: create a fresh Debian 12 LXC. Suggested ID 204, 1 vCPU,
+   2 GB RAM, 10 GB disk. Bridge `vmbr0`. Static IP on the LAN
+   (e.g. `192.168.2.187`).
+2. From the Proxmox host, copy the script in and run it:
+   ```bash
+   pct push 204 /opt/ai-orchestrator/scripts/install_tempo.sh /root/install_tempo.sh
+   pct enter 204
+   bash /root/install_tempo.sh
+   ```
+   The script downloads the Tempo binary tarball from
+   `github.com/grafana/tempo/releases`, installs it to
+   `/usr/local/bin/tempo`, creates the `tempo` system user + data
+   directories, writes `/etc/tempo/tempo.yaml` (single-binary mode,
+   OTLP/gRPC :4317, OTLP/HTTP :4318, query :3200, local-blocks backend),
+   installs a systemd unit and starts it. **Pre-set** `TEMPO_VERSION`
+   to bump from the script default. Health check via `/ready` on :3200
+   takes ~5s after first start; the script polls until it returns 200.
+3. From orchestrator LXC 200, smoke-test connectivity:
+   ```bash
+   curl http://<tempo-lxc-ip>:3200/ready    # → "ready"
+   nc -z <tempo-lxc-ip> 4317                 # OTLP/gRPC reachable
+   ```
+4. Add `OTEL_ENDPOINT` to `/opt/ai-orchestrator/.env`:
+   ```
+   OTEL_ENDPOINT=<tempo-lxc-ip>:4317
+   ```
+5. Flip `otel.enabled = true` in `config.json` and restart the
+   orchestrator service. On startup, ``init_tracing(app)`` builds the
+   global TracerProvider, attaches a BatchSpanProcessor, and
+   instruments FastAPI + requests.
+6. Verify traces flow:
+   ```bash
+   # Generate some traffic
+   for i in 1 2 3 4 5; do curl -fsS http://127.0.0.1:8000/health > /dev/null; done
+   # Wait ~5s for the BatchSpanProcessor to flush, then query Tempo
+   sleep 6
+   curl 'http://<tempo-lxc-ip>:3200/api/search?tags=service.name%3Dai-orchestrator&limit=5'
+   ```
+   The response will include trace IDs with `rootServiceName=ai-orchestrator`.
+
+### Common Tempo issues
+
+- `/ready` returns 503 right after start → Tempo's ingester takes
+  ~10–30s to join the ring on first boot. Wait, then re-check.
+- `level=warn ... feature gate ID=component.UseLocalHostAsDefaultHost`
+  in journalctl → harmless. Tempo recommends explicit local-host
+  binds for production; for a homelab LXC behind a LAN-only firewall,
+  `0.0.0.0` is fine.
+- Traces present in Tempo but missing manual span attributes (e.g. no
+  `orchestrator.run_id`) → ensure the orchestrator restarted AFTER
+  `otel.enabled=true` was set; init_tracing only runs at boot.
+- Cardinality blowup → drop `otel.sample_ratio` to `0.1` (10%) to
+  reduce volume tenfold without losing the ability to investigate.
+
+### Disabling tracing
+
+Set `otel.enabled=false` in `config.json` and restart. Manual span
+sites (log, ssh_command, LLM calls) all delegate to OTel's no-op
+TracerProvider; the cost is a single attribute read per call. The
+Tempo LXC can be shut down without affecting the orchestrator.
