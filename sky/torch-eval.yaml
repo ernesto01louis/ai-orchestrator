@@ -1,0 +1,40 @@
+# sky/torch-eval.yaml — Phase 2.5 PyTorch-eval cloud-burst spec.
+#
+# Example for consumer projects (aerodynamics ML, RF DF ML, torchsig
+# benchmarks) that need a one-shot GPU burst to run a fine-tune /
+# eval / training step. The orchestrator's ``POST /runs/{id}/burst``
+# route invokes this with ``spec_name="torch-eval"`` and overrides
+# the resource accelerator + the ``EVAL_SCRIPT_URL`` env to point at
+# the consumer's actual workload.
+#
+# Once the eval script exits, ``run`` returns and SkyPilot tears the
+# cluster down (no idle window). For interactive runs, set
+# ``detach_run=True`` on the BurstRequest and use the idle-stop
+# failsafe instead.
+
+name: ai-orchestrator-torch-eval
+
+resources:
+  accelerators: A10:1
+  disk_size: 60
+  use_spot: false
+
+envs:
+  EVAL_SCRIPT_URL: ""
+  ORCHESTRATOR_RUN_ID: unset
+
+setup: |
+  set -euo pipefail
+  pip install --quiet torch torchvision torchaudio
+  # Consumer projects include their own deps via the EVAL_SCRIPT_URL
+  # tarball or GitHub clone — keeping this image minimal.
+
+run: |
+  set -euo pipefail
+  if [ -z "${EVAL_SCRIPT_URL}" ]; then
+    echo "ERROR: EVAL_SCRIPT_URL was not provided to the burst — aborting." >&2
+    exit 2
+  fi
+  echo "ai-orchestrator torch-eval burst run_id=${ORCHESTRATOR_RUN_ID}"
+  curl -fsSL "${EVAL_SCRIPT_URL}" -o /tmp/eval.py
+  python /tmp/eval.py
