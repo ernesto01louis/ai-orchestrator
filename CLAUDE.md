@@ -281,6 +281,34 @@ description from a vision model when available.
   Prometheus, "AI Orchestrator — Per-run traces" dashboard).
   RUNBOOK §§ "OpenTelemetry tracing" + "Grafana dashboards".
 
+**Budget tracking (Phase 2.4, opt-in):**
+- Config: ``budget.enabled=false`` default. Set rates per model in
+  ``budget.rates_per_million_tokens`` (USD per 1M prompt + completion
+  tokens; ``default`` is the fallback). ``thresholds_pct`` list
+  controls notification crossings (default ``[50, 80, 100]``);
+  100 ALSO triggers auto-pause.
+- Schema: alembic 0002_budget_tracking adds
+  ``campaigns.{budget_total_usd, budget_used_usd, budget_state,
+  budget_thresholds_emitted}`` + ``llm_calls.{prompt_tokens,
+  cost_usd}``. CHECK constraint on ``budget_state ∈ {ok, warning,
+  breach, paused}``.
+- Calculator: ``core.budget.cost_usd_for(model, prompt, completion)``
+  is a pure lookup × multiplication. ``evaluate_thresholds`` returns
+  a ``BudgetEval`` describing next state, newly-crossed percentages,
+  and ``should_pause``.
+- Accrual: ``core.budget.accrue_to_campaign(run_id, cost)`` is called
+  from ``prefect_io/state_hooks.on_task_completion`` AFTER the
+  ``LlmCall`` row is mirrored. Linear-scans ``campaigns.json`` to
+  find the owning campaign, increments ``budget_used_usd``, fires
+  notifications + Prom counter for newly-crossed thresholds, and
+  pauses the campaign on 100% breach (in-process flag + Prefect
+  ``pause_flow_run``).
+- Route: ``GET /campaigns/{id}/budget`` returns
+  ``{campaign_id, enabled, budget_used_usd, budget_total_usd,
+  percentage_used, budget_state, thresholds_emitted, thresholds_pct}``.
+- Metrics: ``orchestrator_budget_threshold_total{threshold,state}``
+  on ``/metrics``.
+
 **Operational hardening (Phase 1.8):**
 - Config validation: `core/config_schema.py` `OrchestratorSettings` —
   Pydantic v2 model loaded by `core/config.py` at import time. Bad
@@ -414,7 +442,24 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     Each layer no-ops when `otel.enabled=false`; flip the flag once
     Tempo is reachable. +23 net new tests on the default suite (381
     → 404). Live since 2026-05-07.
-2.4 Budget tracking — pending.
+2.4 Budget tracking — DONE (v0.2.4-phase2.4, 2026-05-07). Five
+    atomic commits across `feat/phase2.4-budget`:
+    (2.4.1) ``BudgetConfig`` schema + ``core.budget`` cost calculator
+    + alembic 0002 migration adding ``campaigns.budget_*`` and
+    ``llm_calls.prompt_tokens`` / ``cost_usd``. Migration applied
+    LIVE on LXC 202.
+    (2.4.2 + 2.4.3) state hook computes per-LLM-call cost and accrues
+    to the parent campaign via ``core.budget.accrue_to_campaign``;
+    threshold transitions fire Gotify/ntfy notifications and
+    auto-pause the campaign on 100% breach.
+    (2.4.4) ``GET /campaigns/{id}/budget`` route + Prom counter
+    ``orchestrator_budget_threshold_total{threshold,state}``.
+    +33 net new tests (404 → 437). Live since 2026-05-07:
+    ``budget.enabled=true`` in ``config.json``, default rates
+    ``$0`` for local Ollama (electricity below the measurement
+    threshold), thresholds ``[50, 80, 100]``. Operators raise rates
+    per-model when their consumer projects route through paid
+    providers.
 2.5 SkyPilot for cloud-burst GPU — pending.
 2.6 New UI — pending.
 
@@ -460,7 +505,20 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-07, Phase 2.3 (OpenTelemetry tracing) shipped
+*Last updated: 2026-05-07, Phase 2.4 (Budget tracking) shipped on
+`feat/phase2.4-budget`, tag `v0.2.4-phase2.4`. Five atomic commits
+(2.4.1 BudgetConfig + cost calculator + alembic 0002; 2.4.2-3
+state-hook accrual + threshold transitions + auto-pause on 100%
+breach; 2.4.4 ``GET /campaigns/{id}/budget`` route; docs).
++33 net new tests (404 → 437), end-to-end verified by flipping
+``budget.enabled=true`` in live ``config.json`` and confirming the
+route returns ``{enabled: true, budget_used_usd: 0.0, ...}`` for an
+existing campaign. Default rates are $0 for local Ollama;
+operators set per-model rates when consumer projects route through
+paid providers. No new infrastructure — extends the existing
+Postgres mirror + state-hook pipeline.
+
+Phase 2.3 (OpenTelemetry tracing, prior release) shipped
 on `feat/phase2.3-otel`, tag `v0.2.3-phase2.3`. Six atomic commits
 (2.3.1 dormant SDK + auto-instrument; 2.3.2 manual spans on log /
 ssh / LLM; 2.3.3 install_tempo.sh + LXC 204 LIVE; 2.3.4
