@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+/* ──────────────────────────────────────────────────────────────────────
+   Tailwind v4 theme extension — pulls our oklch design tokens into
+   Tailwind colour utilities so `bg-bg-1` / `text-fg-2` / `border-line`
+   etc. work without `[var(--…)]` arbitraries.
+   ────────────────────────────────────────────────────────────────────── */
+@theme inline {
+  /* Surfaces */
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+
+  /* Text */
+  --color-fg-0: var(--fg-0);
+  --color-fg-1: var(--fg-1);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+
+  /* Accents + semantic */
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-err: var(--err);
+  --color-err-soft: var(--err-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  /* Radius */
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+
+  /* Type */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Menlo", monospace;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   Default (operator console) theme tokens.
+   `useTheme()` flips data-theme on <html>; the personal theme overrides
+   any subset of these via CSS variables on :root in personal.ts.
+   ────────────────────────────────────────────────────────────────────── */
+:root,
+[data-theme="default"] {
+  --bg-0: oklch(0.155 0.006 250);
+  --bg-1: oklch(0.190 0.006 250);
+  --bg-2: oklch(0.225 0.007 250);
+  --bg-3: oklch(0.270 0.008 250);
+  --line: oklch(0.295 0.010 250);
+  --line-soft: oklch(0.245 0.008 250);
+
+  --fg-0: oklch(0.965 0.004 250);
+  --fg-1: oklch(0.820 0.006 250);
+  --fg-2: oklch(0.640 0.008 250);
+  --fg-3: oklch(0.490 0.008 250);
+
+  --accent: oklch(0.82 0.13 205);
+  --accent-soft: oklch(0.40 0.07 205 / 0.18);
+  --accent-line: oklch(0.55 0.10 205 / 0.45);
+
+  --ok: oklch(0.80 0.14 158);
+  --ok-soft: oklch(0.45 0.09 158 / 0.18);
+  --warn: oklch(0.84 0.14 88);
+  --warn-soft: oklch(0.50 0.10 88 / 0.20);
+  --err: oklch(0.72 0.18 25);
+  --err-soft: oklch(0.45 0.13 25 / 0.20);
+  --info: oklch(0.78 0.12 270);
+  --info-soft: oklch(0.45 0.10 270 / 0.20);
+
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   Base layer
+   ────────────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font-size: 13px;
+  line-height: 1.5;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg-0);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 10px;
+  border: 2px solid var(--bg-0);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Focus ring */
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   Atoms — typography helpers + live-dot pulse + terminal block
+   ────────────────────────────────────────────────────────────────────── */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  display: inline-flex;
+  align-items: center;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.pulse {
+  animation: pulse-ring 1.8s ease-out infinite;
+}
+
+.row-hover:hover {
+  background: var(--bg-1);
+}
+
+.term {
+  background: oklch(0.13 0.005 250);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--fg-1);
+}
+.term .ln {
+  padding: 0 12px;
+  white-space: pre;
+}
+.term .ts {
+  color: var(--fg-3);
+}
+.term .ph-planner {
+  color: var(--info);
+}
+.term .ph-generator {
+  color: var(--accent);
+}
+.term .ph-judge {
+  color: var(--warn);
+}
+.term .ph-optimizer {
+  color: var(--ok);
+}
+.term .ph-post_planner {
+  color: var(--info);
+}
+.term .ph-complete {
+  color: var(--ok);
+}
+.term .ph-failed {
+  color: var(--err);
+}
+.term .lvl-err {
+  color: var(--err);
+}

@@ -58,6 +58,12 @@ ui/kazuki_sprites.png
 ui/node_modules/
 ui/dist/
 ui/.git
+# Phase 2.6 console (Vite + React subapp at ui/console/)
+ui/console/node_modules/
+ui/console/dist/
+ui/console/dist-ssr/
+ui/console/*.local
+ui/console/.vite/
 *.bak.*
 
 # GPU services live alongside; keep out of orchestrator repo
