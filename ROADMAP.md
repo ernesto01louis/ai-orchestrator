@@ -317,10 +317,14 @@ Ships **dormant** (`sky.enabled=false` default). Operator action: configure prov
 - [x] Planners return `confidence: float`
 - [x] If confidence < 0.7 and mode != full_auto, auto-pause
 
-### 3.3 NoteDiscovery-grounded planner
-- [ ] Planner queries NoteDiscovery MCP before proposing a campaign
-- [ ] Seeds parameterization from literature
-- [ ] Evidence bundle cites papers used
+### 3.3 NoteDiscovery-grounded planner — DONE (v0.3.3-phase3.3)
+- [x] Planner queries NoteDiscovery REST before proposing a campaign
+      (pivoted from MCP — live container is REST-only)
+- [~] Seeds parameterization from literature — deferred; the operator's
+      vault contains personal notes, not numerical hyperparameters.
+      The LLM planner sees the snippets in its system prompt and
+      decides; programmatic seeding is left for a future iteration.
+- [x] Evidence bundle cites notes used (RO-Crate ``citation`` array)
 
 ### 3.4 Example consumer project — DONE (v0.3.4-phase3.4)
 - [x] `examples/example-consumer/` — trivial math optimization, no domain
