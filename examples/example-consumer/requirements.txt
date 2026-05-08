@@ -1,0 +1,7 @@
+# Phase 3.4 — example consumer.
+#
+# The whole point of the example is that it depends ONLY on the public
+# Python SDK (published to PyPI as ``ai-orchestrator-client``) and a
+# YAML parser. No orchestrator-internal modules are imported.
+ai-orchestrator-client>=0.1.0a0,<0.2
+PyYAML>=6.0,<7
