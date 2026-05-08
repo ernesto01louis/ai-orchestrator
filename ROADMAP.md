@@ -313,9 +313,9 @@ Ships **dormant** (`sky.enabled=false` default). Operator action: configure prov
 - [ ] `hitl_mode`: full_auto / gate_only / checkpoint / step_by_step / co_pilot
 - [ ] ntfy action buttons for approve/reject
 
-### 3.2 SmartPause
-- [ ] Planners return `confidence: float`
-- [ ] If confidence < 0.7 and mode != full_auto, auto-pause
+### 3.2 SmartPause — DONE (v0.3.2-phase3.2)
+- [x] Planners return `confidence: float`
+- [x] If confidence < 0.7 and mode != full_auto, auto-pause
 
 ### 3.3 NoteDiscovery-grounded planner
 - [ ] Planner queries NoteDiscovery MCP before proposing a campaign

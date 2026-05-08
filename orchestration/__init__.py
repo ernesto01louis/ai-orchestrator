@@ -632,7 +632,10 @@ def _smartpause_check(run_id: str, plan: dict) -> None:
     /runs/<run_id>/resume``. Operators without ntfy can hit the
     route from any HTTP client.
     """
+    from core.metrics import observe_smartpause
+
     if not SMARTPAUSE_ENABLED:
+        observe_smartpause("skipped_disabled")
         return
 
     try:
@@ -641,12 +644,14 @@ def _smartpause_check(run_id: str, plan: dict) -> None:
         confidence = 1.0
 
     if confidence >= SMARTPAUSE_THRESHOLD:
+        observe_smartpause("skipped_above")
         return
 
     hitl_mode = _get_run_hitl_mode(run_id)
     if hitl_mode == "full_auto":
         # Phase 3.1 will introduce non-full_auto modes; until then this
         # branch covers every campaign.
+        observe_smartpause("skipped_full_auto")
         return
 
     log(run_id, (
@@ -659,6 +664,7 @@ def _smartpause_check(run_id: str, plan: dict) -> None:
     _update_run_status(run_id, paused="smartpause",
                        smartpause_confidence=round(confidence, 4),
                        smartpause_threshold=SMARTPAUSE_THRESHOLD)
+    observe_smartpause("paused")
 
     resume_url = f"{ORCHESTRATOR_URL.rstrip('/')}/runs/{run_id}/resume"
     try:
@@ -686,6 +692,7 @@ def _smartpause_check(run_id: str, plan: dict) -> None:
         cur = RUN_STATUS.get(run_id, {})
         if cur.get("paused") != "smartpause":
             log(run_id, "SmartPause: resumed")
+            observe_smartpause("resumed")
             return
 
     log(run_id, (
@@ -693,6 +700,7 @@ def _smartpause_check(run_id: str, plan: dict) -> None:
         "continuing"
     ))
     _update_run_status(run_id, paused=None, smartpause_timeout=True)
+    observe_smartpause("timed_out")
 
 
 @task(name="planner_agent", retries=0)

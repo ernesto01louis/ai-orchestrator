@@ -357,6 +357,33 @@ description from a vision model when available.
   `orchestrator_active_runs`. **No `run_id` label** (cardinality
   discipline; Grafana correlates by run_id via logs/traces, not labels).
 
+**SmartPause (Phase 3.2):**
+- Planner schema gains an optional ``confidence: float`` in [0, 1].
+  ``planner_agent`` clamps + defaults to 1.0 when missing
+  (structured-success and unstructured-fallback paths) and to 0.0
+  in the hardcoded "both attempts failed" path. Self-reported by
+  the model; treat as a hint, not ground truth.
+- ``orchestration._smartpause_check(run_id, plan)`` runs immediately
+  after the planner returns. Inert when ``smartpause.enabled=false``,
+  when ``hitl_mode == "full_auto"`` (today: every campaign — Phase
+  3.1 ships per-campaign ``hitl_mode``), or when confidence ≥
+  ``smartpause.confidence_threshold``. Otherwise: sets
+  ``RUN_STATUS[run_id]["paused"]="smartpause"``, fires a notification
+  with a Resume action button at ``/runs/{run_id}/resume``, and blocks
+  in a polling loop until the flag clears or
+  ``pause_timeout_seconds`` (1h default) elapses.
+- ``_get_run_hitl_mode(run_id)`` is a stub that always returns
+  ``"full_auto"`` until Phase 3.1 swaps it for a real campaigns.json
+  lookup.
+- ``POST /runs/{run_id}/resume`` is the unblock route: idempotent,
+  404 on unknown run, sets ``RUN_STATUS[run_id]["paused"]=None``.
+  Phase 3.1 will add the richer ``/runs/{id}/intervene`` (approve /
+  reject / edit); ``/resume`` is the minimum needed for SmartPause
+  to be useful in 3.2-only deployments.
+- Prom counter ``orchestrator_smartpause_total{outcome}`` with
+  outcomes in {paused, resumed, timed_out, skipped_full_auto,
+  skipped_above, skipped_disabled}.
+
 **Consumer pattern (Phase 3.4):**
 - `examples/example-consumer/` is the reference: a domain-neutral
   trivial-math optimization that imports only `ai-orchestrator-client`
@@ -562,7 +589,21 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-08, Phase 3.4 (Example consumer project) shipped
+*Last updated: 2026-05-08, Phase 3.2 (SmartPause) shipped on
+`feat/phase3.2-smartpause`, tag `v0.3.2-phase3.2`. Four atomic commits
+(3.2.1 ``SmartPauseConfig`` + ``agents/planner/schema.json`` confidence
+field + ``planner_agent`` clamp normalisation; 3.2.2
+``_smartpause_check`` helper with notify + polling-loop block, plus
+``POST /runs/{id}/resume`` unblock route; 3.2.3 12 regression tests;
+3.2.4 ``orchestrator_smartpause_total{outcome}`` Prom counter + docs).
++12 net new tests (483 → 495). Inert in current behaviour because
+``_get_run_hitl_mode`` is a stub returning ``"full_auto"`` for every
+run; Phase 3.1 swaps the stub for a real campaigns.json lookup, at
+which point SmartPause becomes active without any callsite changes.
+Second sub-phase of Phase 3; 3.1 HITL modes is next, then 3.3
+NoteDiscovery-grounded planner.
+
+Phase 3.4 (Example consumer project, prior release) shipped
 on `feat/phase3.4-example-consumer`, tag `v0.3.4-phase3.4`. Three atomic
 commits (3.4.1 `examples/example-consumer/` scaffold — README +
 `template.yaml` + `run.py`; 3.4.2 smoke tests via `inprocess_client`
@@ -570,9 +611,7 @@ including a source-text guard against orchestrator-internal imports;
 3.4.3 `CONSUMERS.md` + ROADMAP/CLAUDE updates). +4 net new tests
 (479 → 483). The example imports only `ai-orchestrator-client` + PyYAML;
 copy the directory and replace the prompt + sweep parameter for any
-domain. First sub-phase of Phase 3 (Advanced); 3.2 SmartPause is next,
-then 3.1 HITL modes, then 3.3 NoteDiscovery-grounded planner. Phase 2.6
-(New UI) remains deferred until after Phase 3.
+domain. Phase 2.6 (New UI) remains deferred until after Phase 3.
 
 Phase 2.5 (SkyPilot cloud-burst, prior release) shipped
 on `feat/phase2.5-skypilot`, tag `v0.2.5-phase2.5`. Four atomic
