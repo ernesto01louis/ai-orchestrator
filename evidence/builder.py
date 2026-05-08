@@ -41,11 +41,12 @@ from core.evidence import (
     HardwareFingerprint,
     LlmCall,
     LlmTarget,
+    Reference,
     RunRecord,
     SamplingParams,
 )
 from core.llm_call_log import LLM_CALL_LOG, LlmCallRecord
-from core.paths import LOG_DIR, PROJECTS_DIR, REPO_ROOT
+from core.paths import LOG_DIR, MEMORY_DIR, PROJECTS_DIR, REPO_ROOT
 from evidence import get_plugin_manager
 from evidence.checklists import (
     build_datasheets,
@@ -181,6 +182,8 @@ class _BundleBuilder:
         cards = build_model_cards(targets)
         datasheets = build_datasheets(prompts)
 
+        references = self._collect_planner_references(runs)
+
         bundle = EvidenceBundle(
             bundle_id=str(uuid.uuid4()),
             campaign_id=self.campaign.id,
@@ -198,6 +201,7 @@ class _BundleBuilder:
             neurips_responses=neurips,
             calculators=calculators,
             artifacts=artifacts,
+            references=references,
         )
 
         self._write_checklist_files(bundle)
@@ -292,6 +296,51 @@ class _BundleBuilder:
             latency_ms=rec.duration_ms,
             started_at=started_at,
         )
+
+    def _collect_planner_references(self, runs: list[RunRecord]) -> list[Reference]:
+        """Phase 3.3 — gather NoteDiscovery citations from each run's
+        ``memory/<run_id>/planner_research.json``.
+
+        Deduplicates by ``path`` so the same vault note cited across N
+        runs in a campaign appears once. Snippet preference: shortest
+        non-empty (most "summary-like").
+
+        Returns ``[]`` when no run has a research trace — Phase 3.3 is
+        opt-in; pre-3.3 campaigns and dormant deployments produce no
+        research files.
+        """
+        seen: dict[str, Reference] = {}
+        for run in runs:
+            trace_path = Path(MEMORY_DIR) / run.run_id / "planner_research.json"
+            if not trace_path.is_file():
+                continue
+            try:
+                trace = json.loads(trace_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            for raw in (trace.get("results") or []):
+                if not isinstance(raw, dict):
+                    continue
+                path = str(raw.get("path") or "")
+                if not path:
+                    continue
+                ref = Reference(
+                    name=str(raw.get("name") or path),
+                    path=path,
+                    source="note_discovery",
+                    snippet=str(raw.get("snippet") or "") or None,
+                )
+                prior = seen.get(path)
+                if prior is None:
+                    seen[path] = ref
+                else:
+                    # Keep the shorter (more summary-like) snippet.
+                    a, b = prior.snippet or "", ref.snippet or ""
+                    if a and b and len(b) < len(a):
+                        seen[path] = ref
+                    elif not a and b:
+                        seen[path] = ref
+        return list(seen.values())
 
     def _build_run_records(self) -> list[RunRecord]:
         records: list[RunRecord] = []

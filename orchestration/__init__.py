@@ -628,7 +628,7 @@ def _planner_research(prompt: str, run_id: str) -> list:
     try:
         import datetime as _dt
         from core.note_discovery import NOTEDISCOVERY_BASE_URL  # noqa: PLC0415
-        run_dir = MEMORY_DIR / run_id
+        run_dir = Path(MEMORY_DIR) / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         trace = {
             "run_id": run_id,
