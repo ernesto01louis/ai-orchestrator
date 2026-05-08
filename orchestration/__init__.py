@@ -1182,6 +1182,11 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
         # 3.1 lands, every campaign automatically gains the gate.
         _smartpause_check(run_id, plan)
 
+        # Phase 3.1 HITL — checkpoint mode pauses at every phase boundary.
+        # Inert when hitl_mode is full_auto.
+        from core.hitl import hitl_checkpoint
+        hitl_checkpoint(run_id, "post_planner")
+
         language = plan.get("language", "python").lower()
         project_type = plan.get("project_type", "script")
         entrypoint = plan.get("entrypoint", get_lang_handler(language)["default_entrypoint"])
@@ -1307,6 +1312,16 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 log(run_id, "all generators failed this iteration")
                 continue
 
+            # Phase 3.1 HITL — pause after generators returned
+            # (checkpoint / step_by_step / co_pilot modes).
+            from core.hitl import hitl_checkpoint
+            hitl_checkpoint(run_id, "post_generator")
+
+            # Phase 3.1 HITL — pause after judge scored (each candidate
+            # already has a judge embedded; this is the boundary where
+            # the operator could veto continuing to the optimizer).
+            hitl_checkpoint(run_id, "post_judge")
+
             # track all candidate results for model stats
             all_candidate_results.extend(candidates)
 
@@ -1339,6 +1354,10 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                     req.optimizer_model,
                     run_id
                 ).result()
+
+                # Phase 3.1 HITL — pause after optimizer returned.
+                from core.hitl import hitl_checkpoint
+                hitl_checkpoint(run_id, "post_optimizer")
 
                 if optimized_files and optimized_files != best_files:
 

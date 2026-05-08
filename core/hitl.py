@@ -125,3 +125,99 @@ def get_run_hitl_mode(run_id: str) -> str:
                 return HITL_DEFAULT_MODE
 
     return HITL_DEFAULT_MODE
+
+
+# Phase boundary phases (called from orchestration loop).
+_BOUNDARY_PHASES = (
+    "post_planner",
+    "post_generator",
+    "post_judge",
+    "post_optimizer",
+)
+
+
+def _mode_pauses_at_phase(mode: str, phase: str) -> bool:
+    """Return True iff the given mode pauses at the given gate phase.
+
+    Mode → phases:
+      full_auto        → never
+      gate_only        → only ``gate_denied``
+      checkpoint       → boundary phases only
+      step_by_step     → boundary phases + ``post_llm``
+      co_pilot         → boundary phases + ``pre_llm``
+    """
+    if mode == "full_auto":
+        return False
+    if phase == "gate_denied":
+        return mode in ("gate_only", "checkpoint", "step_by_step", "co_pilot")
+    if phase in _BOUNDARY_PHASES:
+        return mode in ("checkpoint", "step_by_step", "co_pilot")
+    if phase == "post_llm":
+        return mode == "step_by_step"
+    if phase == "pre_llm":
+        return mode == "co_pilot"
+    return False
+
+
+def hitl_checkpoint(
+    run_id: str,
+    phase: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    timeout_seconds: float | None = None,
+) -> dict[str, Any] | None:
+    """Phase 3.1 generic HITL gate.
+
+    Called from the orchestration loop at every potential pause point
+    (planner→generator→judge→optimizer boundaries, per-LLM-call wraps,
+    gate denials). Inert when the run's hitl_mode doesn't pause at
+    ``phase``; otherwise:
+
+      1. Set ``RUN_STATUS[run_id]["paused"] = "hitl:<phase>"``.
+      2. Fire a notification (notify_intervention) with the
+         approve / reject / edit buttons.
+      3. Block in ``wait_for_intervention`` until the operator POSTs
+         to ``/runs/{run_id}/intervene`` or the timeout elapses.
+      4. Return the payload (e.g. for ``action=edit`` to thread the
+         operator's ``prompt`` back to the caller for co_pilot mode).
+      5. Clear the pause flag on exit (success or timeout).
+
+    On timeout, returns ``None`` and the run continues — same
+    fail-open contract SmartPause uses, so a wedged operator doesn't
+    halt a campaign forever.
+    """
+    from core.config import HITL_INTERVENTION_TIMEOUT
+    from core.metrics import observe_hitl
+    from core.runtime import _update_run_status, log
+    from notifications.send import notify_intervention
+
+    mode = get_run_hitl_mode(run_id)
+    if not _mode_pauses_at_phase(mode, phase):
+        observe_hitl(mode=mode, phase=phase, outcome="skipped")
+        return None
+
+    deadline = float(timeout_seconds) if timeout_seconds is not None else float(HITL_INTERVENTION_TIMEOUT)
+
+    log(run_id, f"HITL pause: phase={phase} mode={mode}; awaiting POST /runs/{run_id}/intervene (timeout {deadline:.0f}s)")
+    _update_run_status(run_id, paused=f"hitl:{phase}", hitl_phase=phase, hitl_mode=mode)
+    observe_hitl(mode=mode, phase=phase, outcome="paused")
+
+    try:
+        notify_intervention(run_id, phase=phase)
+    except Exception as e:  # noqa: BLE001 — notifications are best-effort
+        log(run_id, f"HITL notification failed (non-fatal): {e}")
+
+    received = wait_for_intervention(run_id, timeout_seconds=deadline)
+
+    if received is None:
+        log(run_id, f"HITL: timed out at phase={phase} after {deadline:.0f}s; continuing")
+        _update_run_status(run_id, paused=None, hitl_timeout=True)
+        observe_hitl(mode=mode, phase=phase, outcome="timed_out")
+        return None
+
+    action = received.get("action") or "approve"
+    log(run_id, f"HITL: phase={phase} action={action}")
+    _update_run_status(run_id, paused=None, last_intervention=action)
+    observe_hitl(mode=mode, phase=phase, outcome=action)
+
+    return received
