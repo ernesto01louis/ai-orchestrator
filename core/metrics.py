@@ -167,3 +167,26 @@ def observe_budget_threshold(threshold_pct: int, state: str) -> None:
     BUDGET_THRESHOLD_TOTAL.labels(
         threshold=str(threshold_pct), state=state or "unknown",
     ).inc()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.2 SmartPause metrics
+# ---------------------------------------------------------------------------
+# ``outcome`` is one of:
+#   paused          — confidence < threshold AND hitl_mode != full_auto
+#   skipped_full_auto — confidence < threshold but mode = full_auto
+#   skipped_above   — confidence >= threshold (the common case)
+#   skipped_disabled — smartpause.enabled = false
+#   timed_out       — pause_timeout_seconds elapsed without resume
+#   resumed         — operator hit /runs/{id}/resume
+# Bounded cardinality (~6 distinct values).
+
+SMARTPAUSE_TOTAL = Counter(
+    "orchestrator_smartpause_total",
+    "SmartPause guard outcomes after planner returns.",
+    ["outcome"],
+)
+
+
+def observe_smartpause(outcome: str) -> None:
+    SMARTPAUSE_TOTAL.labels(outcome=outcome or "unknown").inc()

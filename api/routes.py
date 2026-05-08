@@ -76,6 +76,7 @@ from core.runtime import (
     _init_run_status,
     _load_run_index,
     _run_status_lock,
+    _update_run_status,
     _ws_clients,
     _ws_lock,
     log,
@@ -431,6 +432,31 @@ def verify_run(run_id: str) -> dict[str, Any]:
         "valid": result.valid,
         "status": result.status,
         "mismatches": result.mismatches,
+    }
+
+
+@router.post("/runs/{run_id}/resume")
+def resume_run(run_id: str) -> dict[str, Any]:
+    """Phase 3.2 SmartPause unblock route.
+
+    Clears ``RUN_STATUS[run_id]["paused"]`` so the orchestration loop's
+    SmartPause polling wake up and continue. Idempotent — safe to call
+    on a run that isn't paused.
+
+    Phase 3.1 will add the richer ``POST /runs/{run_id}/intervene`` with
+    approve/reject/edit semantics; this route is the minimum needed for
+    SmartPause to be useful in 3.2-only deployments.
+    """
+    if run_id not in RUN_STATUS:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
+
+    prior = RUN_STATUS[run_id].get("paused")
+    _update_run_status(run_id, paused=None)
+
+    return {
+        "run_id": run_id,
+        "previously_paused": prior,
+        "paused": None,
     }
 
 

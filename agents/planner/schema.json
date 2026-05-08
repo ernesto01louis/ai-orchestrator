@@ -17,6 +17,12 @@
     "steps": {
       "type": "array",
       "items": {"type": "string"}
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Phase 3.2 SmartPause: planner self-reports certainty in the proposed plan. Below smartpause.confidence_threshold (default 0.7) the run auto-pauses unless the campaign is in full_auto mode. Optional — older planner models that omit it are treated as confidence=1.0."
     }
   },
   "required": ["language", "entrypoint", "project_type", "execution_mode", "files", "dependencies", "steps"]
