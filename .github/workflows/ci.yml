@@ -22,6 +22,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-mock httpx ruff mypy types-requests types-PyYAML
+          # Phase 3.4 — example consumer smoke tests load the SDK to
+          # validate the public contract from the consumer's side. The
+          # orchestrator never imports it at runtime; this is a
+          # dev/test-only dep.
+          pip install 'ai-orchestrator-client>=0.1.0a0,<0.2'
 
       - name: Lint (ruff)
         run: ruff check core llm notifications tools execution memory_pkg orchestration api references_pkg
