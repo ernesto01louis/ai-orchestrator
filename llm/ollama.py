@@ -197,6 +197,18 @@ def query_ollama_api(base_url: str, endpoint: str, timeout: int = 10):
 def query_ollama(model, prompt, url, run_id, agent_role: str = "") -> LlmResponse:
     from core.otel import get_tracer  # noqa: PLC0415
     tracer = get_tracer("ai-orchestrator.llm")
+
+    # Phase 3.1 HITL — co_pilot mode pauses BEFORE the call so the
+    # operator can edit the prompt; step_by_step pauses AFTER. Both
+    # are inert when hitl_mode is full_auto / gate_only / checkpoint.
+    try:
+        from core.hitl import hitl_checkpoint  # noqa: PLC0415
+        edit = hitl_checkpoint(run_id, "pre_llm")
+        if edit and edit.get("action") == "edit" and edit.get("prompt"):
+            prompt = str(edit["prompt"])
+    except Exception:  # noqa: BLE001 — never let HITL break an LLM call
+        pass
+
     log(run_id, f"LLM request -> {model}")
     with tracer.start_as_current_span("llm.generate") as span:
         span.set_attribute("llm.model", model)
@@ -219,6 +231,12 @@ def query_ollama(model, prompt, url, run_id, agent_role: str = "") -> LlmRespons
                 envelope, model=model, url=url,
                 agent_role=agent_role, response_text=text,
             )
+            # Phase 3.1 HITL — step_by_step pauses AFTER the call.
+            try:
+                from core.hitl import hitl_checkpoint  # noqa: PLC0415
+                hitl_checkpoint(run_id, "post_llm")
+            except Exception:  # noqa: BLE001 — never let HITL break an LLM call
+                pass
             return LlmResponse(text=text, envelope=envelope)
         except requests.exceptions.Timeout as e:
             span.set_attribute("llm.outcome", "timeout")
@@ -257,6 +275,17 @@ def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_
     """Structured query with JSON-schema enforcement and temperature 0."""
     from core.otel import get_tracer  # noqa: PLC0415
     tracer = get_tracer("ai-orchestrator.llm")
+
+    # Phase 3.1 HITL — co_pilot lets the operator edit user_prompt
+    # before the call. step_by_step pauses post-call (below).
+    try:
+        from core.hitl import hitl_checkpoint  # noqa: PLC0415
+        edit = hitl_checkpoint(run_id, "pre_llm")
+        if edit and edit.get("action") == "edit" and edit.get("prompt"):
+            user_prompt = str(edit["prompt"])
+    except Exception:  # noqa: BLE001
+        pass
+
     log(run_id, f"LLM structured request -> {model}")
     messages = []
     if system_prompt:
@@ -295,6 +324,12 @@ def query_ollama_structured(model, system_prompt, user_prompt, schema, url, run_
                 span.set_attribute("llm.outcome", "empty_content")
                 log(run_id, f"structured query returned empty content from {model}")
                 return LlmResponse(envelope=envelope)
+            # Phase 3.1 HITL — step_by_step pauses AFTER the call.
+            try:
+                from core.hitl import hitl_checkpoint  # noqa: PLC0415
+                hitl_checkpoint(run_id, "post_llm")
+            except Exception:  # noqa: BLE001
+                pass
             return LlmResponse(parsed=safe_parse_json(content, run_id, context=model), envelope=envelope)
         except requests.exceptions.Timeout as e:
             span.set_attribute("llm.outcome", "timeout")
