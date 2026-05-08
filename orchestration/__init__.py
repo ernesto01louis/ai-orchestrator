@@ -38,6 +38,8 @@ from core.config import (
     SIMILARITY_THRESHOLD, REUSE_SCORE_THRESHOLD,
     TIMEOUT_LLM_GENERATE, TIMEOUT_LLM_STRUCTURED,
     DREAM_AUTO_INTERVAL,
+    SMARTPAUSE_ENABLED, SMARTPAUSE_THRESHOLD,
+    SMARTPAUSE_PAUSE_TIMEOUT, SMARTPAUSE_POLL_INTERVAL,
 )
 from core.paths import (
     PROJECTS_DIR, LOG_DIR, MEMORY_DIR, REFERENCE_DIR,
@@ -91,6 +93,7 @@ from memory_pkg import (
     vault_after_run,
 )
 from notifications import notify_run_complete, notify_run_started
+from notifications.send import send_notification
 from references_pkg import load_reference_content, MAX_REFERENCE_CONTENT_CHARS
 from tools import run_tools
 from gates import consolidate_lessons
@@ -590,6 +593,108 @@ class OrchestrateRequest(BaseModel):
 
 
 
+# ------------------------------------------------
+# Phase 3.2 SmartPause
+# ------------------------------------------------
+
+def _get_run_hitl_mode(run_id: str) -> str:
+    """Return the campaign-level ``hitl_mode`` for a given run.
+
+    Phase 3.2 stub: always returns ``"full_auto"``. Phase 3.1 will
+    replace this with a real lookup against ``campaigns.json``,
+    returning the owning campaign's ``CampaignTemplate.hitl_mode``.
+
+    The five modes (Phase 3.1):
+        full_auto, gate_only, checkpoint, step_by_step, co_pilot
+    Today every run is treated as ``full_auto``, so SmartPause's
+    threshold check is inert in practice — the infrastructure ships
+    in 3.2 so 3.1 can swap this stub without further plumbing.
+    """
+    return "full_auto"
+
+
+def _smartpause_check(run_id: str, plan: dict) -> None:
+    """Phase 3.2 SmartPause guard.
+
+    Called immediately after ``planner_agent`` returns. Inert when:
+      * SmartPause is disabled (``smartpause.enabled=false``)
+      * The run's campaign is in ``full_auto`` mode (today: every run)
+      * The planner's self-reported confidence is at or above
+        ``smartpause.confidence_threshold``
+
+    Otherwise: flags ``RUN_STATUS[run_id]["paused"]="smartpause"``,
+    fires a Gotify/ntfy notification with a Resume action button, and
+    blocks in a polling loop until ``POST /runs/<run_id>/resume``
+    flips the flag — or until ``smartpause.pause_timeout_seconds``
+    expires (in which case the run continues with a logged warning).
+
+    The notification's Resume button posts to ``ORCHESTRATOR_URL +
+    /runs/<run_id>/resume``. Operators without ntfy can hit the
+    route from any HTTP client.
+    """
+    if not SMARTPAUSE_ENABLED:
+        return
+
+    try:
+        confidence = float(plan.get("confidence", 1.0))
+    except (TypeError, ValueError):
+        confidence = 1.0
+
+    if confidence >= SMARTPAUSE_THRESHOLD:
+        return
+
+    hitl_mode = _get_run_hitl_mode(run_id)
+    if hitl_mode == "full_auto":
+        # Phase 3.1 will introduce non-full_auto modes; until then this
+        # branch covers every campaign.
+        return
+
+    log(run_id, (
+        f"SmartPause: confidence={confidence:.2f} < "
+        f"threshold={SMARTPAUSE_THRESHOLD:.2f}; awaiting resume "
+        f"(POST /runs/{run_id}/resume) — timeout "
+        f"{SMARTPAUSE_PAUSE_TIMEOUT}s"
+    ))
+
+    _update_run_status(run_id, paused="smartpause",
+                       smartpause_confidence=round(confidence, 4),
+                       smartpause_threshold=SMARTPAUSE_THRESHOLD)
+
+    resume_url = f"{ORCHESTRATOR_URL.rstrip('/')}/runs/{run_id}/resume"
+    try:
+        send_notification(
+            title=f"SmartPause: run {run_id[:8]}",
+            message=(
+                f"Planner confidence {confidence:.2f} below threshold "
+                f"{SMARTPAUSE_THRESHOLD:.2f}.\n"
+                f"POST {resume_url} to continue."
+            ),
+            priority=8,
+            tags=["pause_button"],
+            actions=[{"type": "http", "label": "Resume",
+                      "url": resume_url}],
+        )
+    except Exception as e:  # noqa: BLE001 — notification is best-effort
+        log(run_id, f"SmartPause notification failed (non-fatal): {e}")
+
+    # Block until resume or timeout. Honour ORCHESTRATOR_PAUSED so a
+    # global pause doesn't silently extend SmartPause beyond the
+    # configured deadline.
+    deadline = time.monotonic() + SMARTPAUSE_PAUSE_TIMEOUT
+    while time.monotonic() < deadline:
+        time.sleep(SMARTPAUSE_POLL_INTERVAL)
+        cur = RUN_STATUS.get(run_id, {})
+        if cur.get("paused") != "smartpause":
+            log(run_id, "SmartPause: resumed")
+            return
+
+    log(run_id, (
+        f"SmartPause: timed out after {SMARTPAUSE_PAUSE_TIMEOUT}s; "
+        "continuing"
+    ))
+    _update_run_status(run_id, paused=None, smartpause_timeout=True)
+
+
 @task(name="planner_agent", retries=0)
 def planner_agent(prompt, model, env, memory_context, run_id):
 
@@ -1062,6 +1167,13 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
             memory_context += f"\n\nATTACHED REFERENCE DOCUMENTS: {ref_names}\nThe generator will receive the full content of these documents. Plan accordingly — the user has provided these as context for the task."
 
         plan = planner_agent.submit(req.prompt, req.planner_model, env, memory_context, run_id).result()
+
+        # Phase 3.2 SmartPause — auto-pause-and-notify if the planner's
+        # self-reported confidence is below the threshold AND the
+        # campaign's hitl_mode is anything but full_auto. Inert today
+        # (Phase 3.1 ships hitl_mode); the call is here so the moment
+        # 3.1 lands, every campaign automatically gains the gate.
+        _smartpause_check(run_id, plan)
 
         language = plan.get("language", "python").lower()
         project_type = plan.get("project_type", "script")

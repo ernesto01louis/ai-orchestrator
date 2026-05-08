@@ -300,6 +300,13 @@ class SmartPauseConfig(_FlexModel):
 
     enabled: bool = True
     confidence_threshold: float = 0.7
+    # How long the orchestration loop waits for a /runs/{id}/resume POST
+    # before timing out and continuing the run. 1h is opinionated; raise
+    # for unattended deployments, lower for tight feedback loops.
+    pause_timeout_seconds: int = 3600
+    # How often the polling loop checks for the resume flag. Two seconds
+    # is a fine compromise between responsiveness and CPU.
+    poll_interval_seconds: float = 2.0
 
 
 class OrchestratorSettings(_FlexModel):

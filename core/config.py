@@ -182,3 +182,5 @@ SKY_MAX_BURST_COST_USD = _settings.sky.max_burst_cost_usd
 # 3.1) ships and a campaign opts out of ``full_auto``.
 SMARTPAUSE_ENABLED = _settings.smartpause.enabled
 SMARTPAUSE_THRESHOLD = _settings.smartpause.confidence_threshold
+SMARTPAUSE_PAUSE_TIMEOUT = int(_settings.smartpause.pause_timeout_seconds)
+SMARTPAUSE_POLL_INTERVAL = float(_settings.smartpause.poll_interval_seconds)
