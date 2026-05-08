@@ -125,6 +125,8 @@ PLAN_SCHEMA = _load_agent_schema("planner", {
         "deps": {"type": "array", "items": {"type": "string"}},
         "approach": {"type": "string"},
         "files": {"type": "array", "items": {"type": "object"}},
+        # Phase 3.2 SmartPause — planner self-confidence in [0, 1].
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     },
     "required": ["language", "entrypoint", "approach"],
 })
@@ -655,7 +657,17 @@ def planner_agent(prompt, model, env, memory_context, run_id):
             emode = "generate"
         result["execution_mode"] = emode
 
-        log(run_id, f"planner: {lang} {ptype}, {len(result['files'])} file(s), entrypoint={result['entrypoint']}, mode={emode}" +
+        # Phase 3.2 SmartPause — clamp planner self-confidence to [0, 1].
+        # Older models that omit it are treated as confidence=1.0 so
+        # SmartPause never trips on absence (lying with silence is the
+        # default; lying with a number is the planner's choice).
+        try:
+            conf = float(result.get("confidence", 1.0))
+        except (TypeError, ValueError):
+            conf = 1.0
+        result["confidence"] = max(0.0, min(1.0, conf))
+
+        log(run_id, f"planner: {lang} {ptype}, {len(result['files'])} file(s), entrypoint={result['entrypoint']}, mode={emode}, confidence={result['confidence']:.2f}" +
             (f", port={port}" if ptype == "server" else ""))
         return result
 
@@ -683,6 +695,12 @@ def planner_agent(prompt, model, env, memory_context, run_id):
         if emode not in ("generate", "tools_only", "tools_then_generate"):
             emode = "generate"
         parsed["execution_mode"] = emode
+        # Phase 3.2 SmartPause — same clamp as the structured path.
+        try:
+            conf = float(parsed.get("confidence", 1.0))
+        except (TypeError, ValueError):
+            conf = 1.0
+        parsed["confidence"] = max(0.0, min(1.0, conf))
         return parsed
 
     log(run_id, "planner fallback also failed, using defaults")
@@ -694,7 +712,13 @@ def planner_agent(prompt, model, env, memory_context, run_id):
         "entrypoint": "main.py",
         "files": {"main.py": "script"},
         "dependencies": [],
-        "steps": []
+        "steps": [],
+        # Phase 3.2 SmartPause: defaults imply low confidence; the
+        # structured planner failed AND the unstructured fallback failed
+        # to parse, so we should not silently mark this run "high
+        # confidence" — better that SmartPause trip and the operator
+        # decide.
+        "confidence": 0.0,
     }
 
 

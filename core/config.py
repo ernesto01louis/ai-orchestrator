@@ -176,3 +176,9 @@ SKY_DEFAULT_ACCELERATOR = _settings.sky.default_accelerator
 SKY_YAML_DIR = _settings.sky.yaml_dir
 SKY_IDLE_TIMEOUT_MINUTES = _settings.sky.idle_timeout_minutes
 SKY_MAX_BURST_COST_USD = _settings.sky.max_burst_cost_usd
+
+# Phase 3.2 SmartPause. ``smartpause.enabled`` defaults True; the
+# threshold check is inert until ``CampaignTemplate.hitl_mode`` (Phase
+# 3.1) ships and a campaign opts out of ``full_auto``.
+SMARTPAUSE_ENABLED = _settings.smartpause.enabled
+SMARTPAUSE_THRESHOLD = _settings.smartpause.confidence_threshold

@@ -149,5 +149,10 @@
     "yaml_dir": "sky",
     "idle_timeout_minutes": 30,
     "max_burst_cost_usd": 5.0
+  },
+  "smartpause": {
+    "_comment": "Phase 3.2 SmartPause. Auto-pauses a run when the planner self-reports confidence below threshold AND the campaign's hitl_mode is anything but full_auto (full_auto is default until Phase 3.1 ships hitl_mode). Threshold is in [0, 1]; 0.7 is the recommended starting point.",
+    "enabled": true,
+    "confidence_threshold": 0.7
   }
 }

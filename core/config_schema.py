@@ -283,6 +283,25 @@ class RedisConfig(_FlexModel):
 # Top-level settings model
 # ---------------------------------------------------------------------------
 
+class SmartPauseConfig(_FlexModel):
+    """Phase 3.2 SmartPause.
+
+    The planner returns a self-reported ``confidence: float`` in
+    ``[0, 1]`` (added to ``agents/planner/schema.json`` in Phase 3.2).
+    When ``confidence < threshold`` AND the campaign's ``hitl_mode``
+    is anything but ``full_auto``, the orchestrator auto-pauses the
+    run and notifies the operator.
+
+    Until Phase 3.1 lands ``hitl_mode``, the threshold check is inert
+    in practice — every campaign defaults to ``full_auto`` so nothing
+    pauses. The infrastructure (config, schema field, accrual) ships
+    in 3.2 so 3.1's HITL modes can rely on it without further plumbing.
+    """
+
+    enabled: bool = True
+    confidence_threshold: float = 0.7
+
+
 class OrchestratorSettings(_FlexModel):
     """Validated view of config.json.
 
@@ -316,3 +335,4 @@ class OrchestratorSettings(_FlexModel):
     otel: OTelConfig = OTelConfig()
     budget: BudgetConfig = BudgetConfig()
     sky: SkyConfig = SkyConfig()
+    smartpause: SmartPauseConfig = SmartPauseConfig()
