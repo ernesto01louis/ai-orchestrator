@@ -594,6 +594,79 @@ class OrchestrateRequest(BaseModel):
 
 
 # ------------------------------------------------
+# Phase 3.3 NoteDiscovery-grounded planner
+# ------------------------------------------------
+
+def _planner_research(prompt: str, run_id: str) -> list:
+    """Query NoteDiscovery for notes relevant to ``prompt`` and persist
+    the trace to ``memory/<run_id>/planner_research.json``.
+
+    Returns the list of ``Note`` dataclasses; empty when NoteDiscovery
+    is disabled or the call fails. Never raises — a wedged
+    NoteDiscovery never blocks a planner call.
+    """
+    try:
+        from core.note_discovery import is_enabled, search_notes
+    except Exception:  # noqa: BLE001
+        return []
+
+    if not is_enabled():
+        return []
+
+    try:
+        notes = search_notes(prompt)
+    except Exception as e:  # noqa: BLE001
+        log(run_id, f"NoteDiscovery search failed (non-fatal): {e}")
+        return []
+
+    if not notes:
+        return []
+
+    log(run_id, f"NoteDiscovery: {len(notes)} relevant notes for planner context")
+
+    # Persist trace per-run for evidence-bundle pickup in Phase 3.3.4.
+    try:
+        import datetime as _dt
+        from core.note_discovery import NOTEDISCOVERY_BASE_URL  # noqa: PLC0415
+        run_dir = Path(MEMORY_DIR) / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        trace = {
+            "run_id": run_id,
+            "host": NOTEDISCOVERY_BASE_URL,
+            "fetched_at": _dt.datetime.utcnow().isoformat() + "Z",
+            "query": prompt,
+            "result_count": len(notes),
+            "results": [
+                {"name": n.name, "path": n.path, "folder": n.folder, "snippet": n.snippet}
+                for n in notes
+            ],
+        }
+        (run_dir / "planner_research.json").write_text(
+            json.dumps(trace, indent=2)
+        )
+    except Exception as e:  # noqa: BLE001
+        log(run_id, f"NoteDiscovery trace persist failed (non-fatal): {e}")
+
+    return notes
+
+
+def _combine_memory_with_notes(memory_context: str | None, notes: list) -> str:
+    """Append a 'Relevant existing notes' block to the planner's
+    memory context. No-op when ``notes`` is empty."""
+    base = memory_context or "No past solutions or failures on record."
+    if not notes:
+        return base
+
+    block_lines = ["", "RELEVANT EXISTING NOTES (from NoteDiscovery vault):"]
+    for n in notes:
+        # Truncate snippet to keep prompts tractable; full content is
+        # in memory/<run_id>/planner_research.json for verification.
+        snippet = (n.snippet or "")[:400]
+        block_lines.append(f"- {n.name} ({n.path}): {snippet}")
+    return base + "\n" + "\n".join(block_lines)
+
+
+# ------------------------------------------------
 # Phase 3.2 SmartPause
 # ------------------------------------------------
 
@@ -711,12 +784,18 @@ def planner_agent(prompt, model, env, memory_context, run_id):
     # Layer 1: Identity as system prompt (first read)
     identity = load_identity()
 
+    # Phase 3.3 — query NoteDiscovery for notes relevant to the prompt,
+    # append them to the memory_context, and persist a research trace
+    # to memory/<run_id>/planner_research.json. Inert when
+    # note_discovery.enabled=false; never raises.
+    research_notes = _planner_research(prompt, run_id)
+
     system_prompt = planner_cfg.render_system_prompt(identity=identity)
 
     user_prompt = planner_cfg.render_user_prompt(
         prompt=prompt,
         env=json.dumps(env, indent=2),
-        memory_context=memory_context if memory_context else "No past solutions or failures on record.",
+        memory_context=_combine_memory_with_notes(memory_context, research_notes),
     )
 
     # try structured output first (uses /api/chat with schema enforcement)

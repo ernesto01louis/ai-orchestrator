@@ -283,6 +283,26 @@ class RedisConfig(_FlexModel):
 # Top-level settings model
 # ---------------------------------------------------------------------------
 
+class NoteDiscoveryConfig(_FlexModel):
+    """Phase 3.3 NoteDiscovery-grounded planner.
+
+    The planner queries the operator's NoteDiscovery vault before
+    proposing a campaign, seeds ``params`` from cited content, and
+    extends the Phase 1.2 evidence bundle with a ``references``
+    array.
+
+    Defaults dormant (``enabled=False``); flip in ``config.json``
+    once the LXC at ``base_url`` is reachable. The orchestrator
+    fail-tolerates a down NoteDiscovery — the planner falls back to
+    its existing memory stack.
+    """
+
+    enabled: bool = False
+    base_url: str = "http://192.168.2.203:8010"
+    top_k: int = 8
+    timeout_seconds: int = 30
+
+
 class HITLConfig(_FlexModel):
     """Phase 3.1 HITL (human-in-the-loop) intervention modes.
 
@@ -367,3 +387,4 @@ class OrchestratorSettings(_FlexModel):
     sky: SkyConfig = SkyConfig()
     smartpause: SmartPauseConfig = SmartPauseConfig()
     hitl: HITLConfig = HITLConfig()
+    note_discovery: NoteDiscoveryConfig = NoteDiscoveryConfig()

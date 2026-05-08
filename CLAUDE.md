@@ -357,6 +357,46 @@ description from a vision model when available.
   `orchestrator_active_runs`. **No `run_id` label** (cardinality
   discipline; Grafana correlates by run_id via logs/traces, not labels).
 
+**NoteDiscovery-grounded planner (Phase 3.3):**
+- ``core/note_discovery.py`` — REST client (not MCP, despite the
+  original plan; the live container at ``192.168.2.203:8010``
+  exposes a plain FastAPI app, no ``/mcp`` endpoint). Three public
+  callables: ``is_enabled()`` (three-condition gate),
+  ``healthcheck()`` (cheap GET /health probe), and
+  ``search_notes(query, top_k)`` returning typed ``Note`` dataclasses
+  with HTML-stripped snippets.
+- ``orchestration._planner_research(prompt, run_id)`` queries
+  NoteDiscovery at the start of every ``planner_agent`` call and
+  prepends a "RELEVANT EXISTING NOTES" block to the planner's
+  memory context. The full query→results trace is persisted to
+  ``memory/<run_id>/planner_research.json``. Inert when
+  ``note_discovery.enabled=false``; fail-tolerant on every error
+  path (search failure / parse failure / persist failure).
+- ``EvidenceBundle.references: list[Reference]`` — Phase 3.3
+  extension to the Phase 1.2 schema. Populated by
+  ``evidence.builder.build_bundle`` which deduplicates the
+  ``planner_research.json`` traces across all runs in a campaign,
+  preferring shorter (more summary-like) snippets. Round-trips
+  losslessly via the existing ``ai_orchestrator:bundle`` carrier;
+  RO-Crate emission additionally surfaces them as standard
+  ``CreativeWork`` entities under the root Dataset's ``citation``
+  array (RO-Crate 1.2 / WRROC).
+- Startup healthcheck in ``app.py:_lifespan`` after the SkyPilot
+  daemon. Logs ``note_discovery: reachable`` on success, a warning
+  on failure; never fatal.
+- Prom metrics: counter
+  ``orchestrator_notediscovery_queries_total{outcome}`` (success /
+  empty / failure / disabled) and histogram
+  ``orchestrator_notediscovery_query_duration_seconds`` (9 buckets,
+  50ms → 30s).
+- Param seeding from literature was deferred — the operator's
+  NoteDiscovery vault is personal notes, not numerical
+  hyperparameters. The LLM planner consumes the snippets in its
+  system prompt and proposes ``params`` with that context; the
+  programmatic regex-extractor is left for a future iteration.
+- Ships dormant by default (``note_discovery.enabled=false``);
+  operator action: confirm GET /health, flip the flag, restart.
+
 **HITL intervention modes (Phase 3.1):**
 - ``CampaignTemplate.hitl_mode`` selects per-campaign interventionism;
   default ``"full_auto"`` keeps existing behaviour. SDK 0.1.0a1
@@ -629,7 +669,29 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-08, Phase 3.1 (HITL intervention modes) shipped
+*Last updated: 2026-05-08, Phase 3.3 (NoteDiscovery-grounded planner)
+shipped on `feat/phase3.3-notediscovery`, tag `v0.3.3-phase3.3`.
+Original plan called for an MCP wrapper around NoteDiscovery; the
+live container at 192.168.2.203:8010 turned out to expose a plain
+REST API (NoteDiscovery 0.19.1, no /mcp endpoint), so 3.3 pivoted
+to a thin requests-based REST client — same goal, simpler plumbing.
+Six atomic commits (3.3.1+3.3.2 ``docs/NOTEDISCOVERY.md`` contract +
+``core/note_discovery.py`` with is_enabled / healthcheck /
+search_notes; 3.3.3 ``_planner_research`` step in planner_agent +
+``memory/<run_id>/planner_research.json`` trace; 3.3.4
+``EvidenceBundle.references`` field + RO-Crate ``citation``
+emission via builder de-dup pass; 3.3.5 SKIPPED — operator vault is
+personal notes, programmatic param-seeding would be noise; 3.3.6
+startup healthcheck + Prom counter/histogram + RUNBOOK; 3.3.7 17
+regression tests + CLAUDE.md + ROADMAP). +17 net new tests
+(530 → 547). Ships dormant; operator flips
+``note_discovery.enabled=true`` after confirming GET /health on the
+container. Phase 3 advanced is now complete (3.4 / 3.2 / 3.1 / 3.3
+all shipped); 3.5 federation dropped per VISION.md. Phase 2.6
+(New UI) is next, with substantially more behavior to surface than
+at the original deferral point.
+
+Phase 3.1 (HITL intervention modes, prior release) shipped
 on `feat/phase3.1-hitl-modes`, tag `v0.3.1-phase3.1`. Seven atomic
 commits (3.1.1 ``hitl_mode`` field on ``CampaignTemplate`` +
 ``HITLConfig`` + ``core/hitl.py`` lookup/queue + replaces the SmartPause

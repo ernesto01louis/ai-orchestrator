@@ -192,3 +192,13 @@ SMARTPAUSE_POLL_INTERVAL = float(_settings.smartpause.poll_interval_seconds)
 HITL_DEFAULT_MODE = _settings.hitl.default_mode
 HITL_INTERVENTION_TIMEOUT = int(_settings.hitl.intervention_timeout_seconds)
 HITL_POLL_INTERVAL = float(_settings.hitl.poll_interval_seconds)
+
+# Phase 3.3 NoteDiscovery-grounded planner. Ships dormant — flip
+# ``note_discovery.enabled=true`` in config.json once the live
+# NoteDiscovery container is reachable at base_url. The orchestrator
+# fail-tolerates a down NoteDiscovery; the planner falls back to its
+# existing memory stack on any error.
+NOTEDISCOVERY_ENABLED = _settings.note_discovery.enabled
+NOTEDISCOVERY_BASE_URL = _settings.note_discovery.base_url
+NOTEDISCOVERY_TOP_K = int(_settings.note_discovery.top_k)
+NOTEDISCOVERY_TIMEOUT_SECONDS = int(_settings.note_discovery.timeout_seconds)

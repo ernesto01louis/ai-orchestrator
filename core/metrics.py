@@ -215,3 +215,27 @@ def observe_hitl(*, mode: str, phase: str, outcome: str) -> None:
         phase=phase or "unknown",
         outcome=outcome or "unknown",
     ).inc()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.3 NoteDiscovery metrics
+# ---------------------------------------------------------------------------
+# ``outcome`` is one of {success, empty, failure, disabled}. Bounded
+# cardinality (4 values).
+
+NOTEDISCOVERY_QUERIES_TOTAL = Counter(
+    "orchestrator_notediscovery_queries_total",
+    "NoteDiscovery search outcomes from the planner research step.",
+    ["outcome"],
+)
+
+NOTEDISCOVERY_QUERY_DURATION = Histogram(
+    "orchestrator_notediscovery_query_duration_seconds",
+    "NoteDiscovery search call duration (success or failure).",
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+)
+
+
+def observe_note_discovery_query(outcome: str, duration_seconds: float) -> None:
+    NOTEDISCOVERY_QUERIES_TOTAL.labels(outcome=outcome or "unknown").inc()
+    NOTEDISCOVERY_QUERY_DURATION.observe(max(0.0, float(duration_seconds)))

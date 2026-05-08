@@ -159,5 +159,12 @@
     "_comment": "Phase 3.1 HITL intervention modes. Per-campaign override via CampaignTemplate.hitl_mode (full_auto / gate_only / checkpoint / step_by_step / co_pilot). default_mode applies to runs not bound to a campaign. intervention_timeout_seconds bounds the orchestrator's wait at each pause; raise for unattended deployments.",
     "default_mode": "full_auto",
     "intervention_timeout_seconds": 3600
+  },
+  "note_discovery": {
+    "_comment": "Phase 3.3 NoteDiscovery-grounded planner. Ships dormant. Flip enabled=true once the NoteDiscovery container at base_url is reachable; the orchestrator queries /api/search before each campaign and seeds params + evidence references from matching notes. Optional NOTEDISCOVERY_API_KEY in .env; auth is advertised in NoteDiscovery 0.19.1 OpenAPI but not enforced.",
+    "enabled": false,
+    "base_url": "http://192.168.2.203:8010",
+    "top_k": 8,
+    "timeout_seconds": 30
   }
 }

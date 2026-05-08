@@ -287,6 +287,22 @@ class Artifact(BaseModel):
     ]
 
 
+class Reference(BaseModel):
+    """Phase 3.3 — citation to a note or external work that informed
+    the planner's campaign proposal.
+
+    Mapped to RO-Crate's ``citation`` property under the root dataset.
+    Sources today are operator notes (NoteDiscovery vault entries);
+    future sources (Semantic Scholar, OpenAlex, …) reuse the same
+    schema with ``source`` set accordingly.
+    """
+
+    name: str  # human-readable label (e.g. note name or paper title)
+    path: str  # vault path, URL, or DOI
+    source: str = "note_discovery"  # provenance — "note_discovery" today
+    snippet: str | None = None  # first ~400 chars of relevance
+
+
 # ── the root ──────────────────────────────────────────
 
 class EvidenceBundle(BaseModel):
@@ -331,3 +347,11 @@ class EvidenceBundle(BaseModel):
 
     # Per-file index (mirrors RO-Crate hasPart).
     artifacts: list[Artifact] = []
+
+    # Phase 3.3 — citations to operator notes / external literature
+    # that informed the planner's campaign proposal. Persisted by
+    # ``evidence.builder.build_bundle`` from
+    # ``memory/<run_id>/planner_research.json`` files. Emitted as
+    # RO-Crate ``CreativeWork`` entities under the root dataset's
+    # ``citation`` property in 1.2 / WRROC.
+    references: list["Reference"] = []

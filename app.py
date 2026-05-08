@@ -165,6 +165,22 @@ async def _lifespan(app_instance):
         start_idle_stop_daemon()
     except Exception as e:
         print(f"WARNING: SkyPilot idle-stop daemon failed to start: {e}")
+
+    # Phase 3.3 NoteDiscovery healthcheck. No-op when
+    # ``note_discovery.enabled=false``. Logs a warning if the operator
+    # flipped the flag but the container is unreachable; never fatal —
+    # the planner falls back to its existing memory stack on every
+    # search call.
+    try:
+        from core.note_discovery import healthcheck, is_enabled  # noqa: PLC0415
+        if is_enabled():
+            if healthcheck():
+                print("note_discovery: reachable")
+            else:
+                print("WARNING: NoteDiscovery enabled but healthcheck failed; planner will fall back to memory")
+    except Exception as e:
+        print(f"WARNING: NoteDiscovery healthcheck failed at startup: {e}")
+
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield

@@ -70,6 +70,7 @@ def to_rocrate(bundle: EvidenceBundle) -> dict[str, Any]:
     llm_entities = [_llm_target_entity(t, idx) for idx, t in enumerate(bundle.llm_targets)]
     run_entities = [_run_action_entity(r) for r in bundle.runs]
     artifact_entities = [_artifact_entity(a) for a in bundle.artifacts]
+    reference_entities = [_reference_entity(r, idx) for idx, r in enumerate(bundle.references)]
 
     control_action = {
         "@id": f"#campaign/{bundle.campaign_id}",
@@ -82,7 +83,7 @@ def to_rocrate(bundle: EvidenceBundle) -> dict[str, Any]:
     }
     control_action = {k: v for k, v in control_action.items() if v is not None}
 
-    root_dataset = {
+    root_dataset: dict[str, Any] = {
         "@id": "./",
         "@type": "Dataset",
         "name": f"Evidence bundle: {bundle.campaign_name}",
@@ -96,6 +97,12 @@ def to_rocrate(bundle: EvidenceBundle) -> dict[str, Any]:
         # Lossless round-trip carrier — keeps the Pydantic bundle authoritative.
         _AI_ORCHESTRATOR_BUNDLE_PROPERTY: bundle.model_dump(mode="json"),
     }
+    if reference_entities:
+        # Phase 3.3 — surface NoteDiscovery citations under the
+        # standard RO-Crate citation property so RO-Crate consumers see
+        # them without parsing the proprietary ai_orchestrator:bundle
+        # blob.
+        root_dataset["citation"] = [{"@id": e["@id"]} for e in reference_entities]
 
     builder_entity = {
         "@id": "#ai-orchestrator",
@@ -112,6 +119,7 @@ def to_rocrate(bundle: EvidenceBundle) -> dict[str, Any]:
         *llm_entities,
         *run_entities,
         *artifact_entities,
+        *reference_entities,
     ]
 
     return {
@@ -195,6 +203,28 @@ def _artifact_entity(art: Any) -> dict[str, Any]:
         "description": art.description or "",
         "ai_orchestrator:role": art.role,
     }
+
+
+def _reference_entity(ref: Any, idx: int) -> dict[str, Any]:
+    """Phase 3.3 — emit a Reference as a RO-Crate ``CreativeWork``.
+
+    Uses the path as the ``@id`` when it looks like a URL or DOI;
+    otherwise falls back to a synthetic ``#ref-N`` id so multiple
+    notes in the same vault get unique entities.
+    """
+    path = ref.path or ""
+    is_uri = path.startswith(("http://", "https://", "doi:"))
+    entity: dict[str, Any] = {
+        "@id": path if is_uri else f"#ref-{idx}",
+        "@type": "CreativeWork",
+        "name": ref.name or path or f"reference-{idx}",
+        "ai_orchestrator:source": ref.source,
+    }
+    if not is_uri and path:
+        entity["url"] = path
+    if ref.snippet:
+        entity["description"] = ref.snippet
+    return entity
 
 
 def _action_status(run_status: str) -> str:
