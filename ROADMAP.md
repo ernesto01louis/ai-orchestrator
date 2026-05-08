@@ -322,9 +322,9 @@ Ships **dormant** (`sky.enabled=false` default). Operator action: configure prov
 - [ ] Seeds parameterization from literature
 - [ ] Evidence bundle cites papers used
 
-### 3.4 Example consumer project
-- [ ] `examples/example-consumer/` — trivial math optimization, no domain
-- [ ] Reference implementation for `CONSUMERS.md`
+### 3.4 Example consumer project — DONE (v0.3.4-phase3.4)
+- [x] `examples/example-consumer/` — trivial math optimization, no domain
+- [x] Reference implementation for `CONSUMERS.md`
 
 ### 3.5 (Removed) Multi-orchestrator federation
 - Per VISION.md: "probably unnecessary." Dropped.
