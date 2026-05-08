@@ -50,9 +50,10 @@ class CampaignTemplate(BaseModel):
     #   step_by_step — pauses after every LLM call (debug-only)
     #   co_pilot     — pauses BEFORE every LLM call to allow prompt
     #                  edits (debug-only)
-    # Defaults to ``full_auto`` so existing campaigns keep working
-    # unchanged.
-    hitl_mode: HITLMode = "full_auto"
+    # ``None`` is accepted (older SDK clients send the field as null
+    # when unset) and normalised to ``"full_auto"`` by
+    # ``core.hitl.get_run_hitl_mode``.
+    hitl_mode: HITLMode | None = None
 
 
 class CampaignCreate(BaseModel):

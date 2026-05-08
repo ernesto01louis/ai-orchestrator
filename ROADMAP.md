@@ -309,9 +309,9 @@ Ships **dormant** (`sky.enabled=false` default). Operator action: configure prov
 
 ## Phase 3 — Advanced (~6 weeks + ongoing)
 
-### 3.1 HITL intervention modes
-- [ ] `hitl_mode`: full_auto / gate_only / checkpoint / step_by_step / co_pilot
-- [ ] ntfy action buttons for approve/reject
+### 3.1 HITL intervention modes — DONE (v0.3.1-phase3.1)
+- [x] `hitl_mode`: full_auto / gate_only / checkpoint / step_by_step / co_pilot
+- [x] ntfy action buttons for approve/reject
 
 ### 3.2 SmartPause — DONE (v0.3.2-phase3.2)
 - [x] Planners return `confidence: float`
