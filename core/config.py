@@ -184,3 +184,11 @@ SMARTPAUSE_ENABLED = _settings.smartpause.enabled
 SMARTPAUSE_THRESHOLD = _settings.smartpause.confidence_threshold
 SMARTPAUSE_PAUSE_TIMEOUT = int(_settings.smartpause.pause_timeout_seconds)
 SMARTPAUSE_POLL_INTERVAL = float(_settings.smartpause.poll_interval_seconds)
+
+# Phase 3.1 HITL (human-in-the-loop) intervention modes. Per-campaign
+# ``CampaignTemplate.hitl_mode`` overrides the default; the timeout is
+# how long ``_hitl_checkpoint`` waits for a POST to /runs/{id}/intervene
+# before falling through and continuing the run.
+HITL_DEFAULT_MODE = _settings.hitl.default_mode
+HITL_INTERVENTION_TIMEOUT = int(_settings.hitl.intervention_timeout_seconds)
+HITL_POLL_INTERVAL = float(_settings.hitl.poll_interval_seconds)

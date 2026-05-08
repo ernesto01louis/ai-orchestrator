@@ -600,17 +600,16 @@ class OrchestrateRequest(BaseModel):
 def _get_run_hitl_mode(run_id: str) -> str:
     """Return the campaign-level ``hitl_mode`` for a given run.
 
-    Phase 3.2 stub: always returns ``"full_auto"``. Phase 3.1 will
-    replace this with a real lookup against ``campaigns.json``,
-    returning the owning campaign's ``CampaignTemplate.hitl_mode``.
+    Phase 3.1 — delegates to ``core.hitl.get_run_hitl_mode`` which
+    scans ``campaigns.json`` for the owning campaign's
+    ``CampaignTemplate.hitl_mode``. Single-shot orchestrations (no
+    parent campaign) get ``HITL_DEFAULT_MODE``.
 
-    The five modes (Phase 3.1):
-        full_auto, gate_only, checkpoint, step_by_step, co_pilot
-    Today every run is treated as ``full_auto``, so SmartPause's
-    threshold check is inert in practice — the infrastructure ships
-    in 3.2 so 3.1 can swap this stub without further plumbing.
+    Kept as a thin wrapper so 3.2's SmartPause callsite remains
+    unchanged.
     """
-    return "full_auto"
+    from core.hitl import get_run_hitl_mode
+    return get_run_hitl_mode(run_id)
 
 
 def _smartpause_check(run_id: str, plan: dict) -> None:

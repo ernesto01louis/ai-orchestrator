@@ -18,6 +18,11 @@ CampaignStatus = Literal[
 ]
 
 
+HITLMode = Literal[
+    "full_auto", "gate_only", "checkpoint", "step_by_step", "co_pilot"
+]
+
+
 class CampaignTemplate(BaseModel):
     """OrchestrateRequest skeleton applied to every child run.
 
@@ -36,6 +41,18 @@ class CampaignTemplate(BaseModel):
     troubleshooter_model: str | None = None
     max_iterations: int | None = None
     reference_files: list[str] | None = None
+    # Phase 3.1 HITL intervention modes. Controls how aggressively the
+    # orchestrator pauses for human input:
+    #   full_auto    — today's behaviour (only Gates blocks pause)
+    #   gate_only    — Gate denials route through HITL; otherwise auto
+    #   checkpoint   — pauses at phase boundaries
+    #                  (planner→generator→judge→optimizer)
+    #   step_by_step — pauses after every LLM call (debug-only)
+    #   co_pilot     — pauses BEFORE every LLM call to allow prompt
+    #                  edits (debug-only)
+    # Defaults to ``full_auto`` so existing campaigns keep working
+    # unchanged.
+    hitl_mode: HITLMode = "full_auto"
 
 
 class CampaignCreate(BaseModel):
