@@ -31,6 +31,10 @@ memory/campaigns.json
 # campaigns/ root (e.g., example.yaml) stay versioned; the per-campaign
 # subdirectories campaigns/<id>/ are runtime output.
 campaigns/*/
+# Phase 3.4 — example consumers may write local outputs (runs/, caches);
+# the example source stays tracked.
+examples/*/runs/
+examples/*/__pycache__/
 memory/lessons/
 memory/targets/
 memory/primer.md

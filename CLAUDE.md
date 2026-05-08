@@ -78,6 +78,8 @@ dream.py, gates.py,                      Already extracted, kept at root for com
 mcp_server.py
 campaign_templates/                      YAML campaign templates (git-tracked)
 campaigns/                               Per-campaign evidence crates (DVC-tracked)
+examples/example-consumer/               Phase 3.4 reference consumer (math, no domain) —
+                                         imports only ai-orchestrator-client SDK + PyYAML
 scripts/install_signing_key.sh           one-shot Ed25519 key setup
 scripts/install_prefect.sh               LXC 201 bootstrap (Prefect server install).
 scripts/install_prefect_worker.sh        orchestrator-side bootstrap (registers deployments).
@@ -355,6 +357,19 @@ description from a vision model when available.
   `orchestrator_active_runs`. **No `run_id` label** (cardinality
   discipline; Grafana correlates by run_id via logs/traces, not labels).
 
+**Consumer pattern (Phase 3.4):**
+- `examples/example-consumer/` is the reference: a domain-neutral
+  trivial-math optimization that imports only `ai-orchestrator-client`
+  + PyYAML, posts via `OrchestratorClient.start_campaign`, streams
+  via `Campaign.iter_runs(client)`, downloads the Phase 1.2 evidence
+  bundle, and verifies the Phase 1.5 Merkle root.
+- `CONSUMERS.md` at the repo root captures the full public surface
+  + minimum-viable consumer snippet + the rules of the road
+  ("never import orchestrator internals", "pin the SDK with a range",
+  "hypothesis is required").
+- `tests/examples/test_example_consumer_smoke.py` enforces the
+  consumer-internal-import guard via source-text scan.
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase task list.
@@ -547,7 +562,19 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-07, Phase 2.5 (SkyPilot cloud-burst) shipped
+*Last updated: 2026-05-08, Phase 3.4 (Example consumer project) shipped
+on `feat/phase3.4-example-consumer`, tag `v0.3.4-phase3.4`. Three atomic
+commits (3.4.1 `examples/example-consumer/` scaffold — README +
+`template.yaml` + `run.py`; 3.4.2 smoke tests via `inprocess_client`
+including a source-text guard against orchestrator-internal imports;
+3.4.3 `CONSUMERS.md` + ROADMAP/CLAUDE updates). +4 net new tests
+(479 → 483). The example imports only `ai-orchestrator-client` + PyYAML;
+copy the directory and replace the prompt + sweep parameter for any
+domain. First sub-phase of Phase 3 (Advanced); 3.2 SmartPause is next,
+then 3.1 HITL modes, then 3.3 NoteDiscovery-grounded planner. Phase 2.6
+(New UI) remains deferred until after Phase 3.
+
+Phase 2.5 (SkyPilot cloud-burst, prior release) shipped
 on `feat/phase2.5-skypilot`, tag `v0.2.5-phase2.5`. Four atomic
 commits (2.5.1 ``core.sky`` lazy-import wrapper + ``BurstConfig``
 + ``skypilot[runpod,vast]`` pin; 2.5.2 ``sky/llm-burst.yaml`` +

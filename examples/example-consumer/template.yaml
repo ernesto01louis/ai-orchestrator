@@ -1,0 +1,53 @@
+# example-consumer — trivial math optimization (Phase 3.4)
+#
+# Reference template for a consumer project. Domain-neutral on purpose
+# (math, no hardware/RF/CFD/aero). Replace the prompt and the sweep
+# parameter with whatever you actually want to vary.
+#
+# Edit ``deploy_target`` below to one of your configured SSH targets
+# (see your orchestrator's ``config.json``: ``ssh_targets`` keys).
+#
+# Run via::
+#
+#     pip install -r requirements.txt
+#     python run.py
+
+name: example-consumer-quadratic
+hypothesis: |
+  A Python function ``f(x) = -(x - 3.0)**2 + sin(x)`` peaks near
+  x = 3.0 with f(3.0) ≈ 0.1411. Across two seeds, generators that
+  encode this correctly print PASS within ±0.5 of the peak.
+
+description: |
+  Trivial math optimization. No domain content. Demonstrates the
+  consumer→orchestrator contract end-to-end:
+    1. POST /campaigns via ai-orchestrator-client SDK
+    2. Stream new runs as Prefect populates them
+    3. Download the Phase 1.2 evidence bundle on completion
+    4. Verify the Phase 1.5 Merkle root
+  Copy this directory and replace the prompt + params with your domain.
+
+template:
+  project_name: "example_consumer_seed_{seed}"
+  prompt: |
+    Write a Python function ``f(x: float) -> float`` that returns
+    ``-(x - 3.0)**2 + math.sin(x)``. Then in a ``__main__`` block
+    evaluate ``f(3.0)`` and print "PASS" if the result is within
+    0.5 of 0.1411, otherwise "FAIL".
+
+    Use seed = {seed} only as a label printed before the result.
+
+  planner_model: qwen2.5:72b
+  generator_models:
+    - qwen2.5-coder:32b
+  judge_model: qwen2.5:72b
+  deploy_target: pi-1
+  max_iterations: 2
+
+params:
+  seed:
+    - 1
+    - 2
+
+max_runs: null
+parallelism: 1
