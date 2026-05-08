@@ -106,12 +106,18 @@ def search_notes(query: str, *, top_k: int | None = None) -> list[Note]:
     or an empty list on any failure. Never raises — a wedged
     NoteDiscovery never breaks a planner call.
     """
+    import time
+
+    from core.metrics import observe_note_discovery_query
+
     if not is_enabled() or not query:
+        observe_note_discovery_query("disabled", 0.0)
         return []
 
     limit = int(top_k) if top_k is not None else NOTEDISCOVERY_TOP_K
     url = NOTEDISCOVERY_BASE_URL.rstrip("/") + "/api/search"
 
+    started = time.monotonic()
     try:
         resp = requests.get(
             url,
@@ -122,9 +128,11 @@ def search_notes(query: str, *, top_k: int | None = None) -> list[Note]:
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError, OSError):
+        observe_note_discovery_query("failure", time.monotonic() - started)
         return []
 
     if not isinstance(data, dict):
+        observe_note_discovery_query("failure", time.monotonic() - started)
         return []
 
     out: list[Note] = []
@@ -145,4 +153,5 @@ def search_notes(query: str, *, top_k: int | None = None) -> list[Note]:
             folder=str(raw.get("folder", "")),
             snippet=snippet,
         ))
+    observe_note_discovery_query("success" if out else "empty", time.monotonic() - started)
     return out

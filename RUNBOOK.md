@@ -1066,3 +1066,73 @@ Flip `sky.enabled = false` in `config.json` and restart. Already-
 running clusters keep running (we don't auto-tear-down on disable —
 operators manually `sky down` them). Future launch attempts return
 503.
+
+## NoteDiscovery-grounded planner (Phase 3.3)
+
+Before proposing a campaign, the planner queries NoteDiscovery
+(Docker LXC at `192.168.2.203:8010` by default) for vault notes
+relevant to the prompt and prepends them to its memory context.
+The full query→results trace is persisted at
+`memory/<run_id>/planner_research.json`; the Phase 1.2 evidence
+bundle picks them up as `references` and emits them as RO-Crate
+`citation` entities.
+
+### Topology
+
+- **NoteDiscovery server**: 192.168.2.203:8010 (your existing
+  NoteDiscovery container; no MCP shim needed — the orchestrator
+  talks REST).
+- **Endpoints used**: `GET /api/search?q=…&limit=N` and
+  `GET /health`. Auth declared in OpenAPI but not enforced as of
+  NoteDiscovery 0.19.1; the orchestrator sends an optional
+  `X-API-Key` header from `.env` (`NOTEDISCOVERY_API_KEY`) for
+  forward-compat.
+
+### One-time setup (operator)
+
+1. Ensure NoteDiscovery is reachable: `curl
+   http://192.168.2.203:8010/health` returns
+   `{"status":"healthy",...}`.
+2. (Optional) drop `NOTEDISCOVERY_API_KEY=…` into
+   `/opt/ai-orchestrator/.env` if NoteDiscovery is later tightened
+   to enforce auth.
+3. Edit live `config.json`:
+
+   ```json
+   "note_discovery": {
+     "enabled": true,
+     "base_url": "http://192.168.2.203:8010",
+     "top_k": 8,
+     "timeout_seconds": 30
+   }
+   ```
+
+4. `systemctl restart ai-orchestrator` and watch for
+   `note_discovery: reachable` in the journal. If you see
+   `WARNING: NoteDiscovery enabled but healthcheck failed`, the
+   container isn't reachable and the planner will continue without
+   research grounding (fail-open).
+
+5. Trigger a campaign and inspect:
+   - `memory/<run_id>/planner_research.json` — query + result trace
+   - Evidence crate `evidence.json::references` and the RO-Crate
+     `citation` array under the root Dataset
+   - `/metrics | grep notediscovery` — counter + duration histogram
+
+### Common NoteDiscovery issues
+
+- Empty `results` despite a populated vault → query phrase doesn't
+  match. NoteDiscovery does substring search; rephrase or raise
+  `top_k`.
+- Healthcheck shows `unreachable` after a NoteDiscovery upgrade →
+  port may have shifted. Confirm with `curl
+  http://192.168.2.203:8010/health` and update `base_url`.
+- Snippets contain `<mark class="search-highlight">…</mark>` HTML
+  → the `_strip_marks` filter regressed. Open
+  `core/note_discovery.py:_HIGHLIGHT_RE` and adjust the regex.
+
+### Disabling NoteDiscovery
+
+Flip `note_discovery.enabled = false` in `config.json` and restart.
+The planner falls back to its existing memory stack on every search
+call; existing `planner_research.json` traces remain on disk.
