@@ -188,6 +188,26 @@ def check_gate(command, tool_name="", args=None, run_id=""):
                         run_id=run_id,
                         source="gate_block",
                     )
+                    # Phase 3.1 HITL — gate_only / checkpoint /
+                    # step_by_step / co_pilot route gate denials
+                    # through the intervention queue. Operator can
+                    # approve (override the gate this once), reject
+                    # (stop), or edit (continue with a different
+                    # command — the caller handles the override).
+                    # full_auto keeps today's hard short-circuit.
+                    if run_id:
+                        try:
+                            from core.hitl import hitl_checkpoint  # noqa: PLC0415
+                            decision = hitl_checkpoint(
+                                run_id, "gate_denied",
+                                payload={"gate_id": gate["id"], "msg": msg},
+                            )
+                            if decision and decision.get("action") == "approve":
+                                # Operator overrode the gate — let the
+                                # command through this once.
+                                return True, gate, f"override: {msg}"
+                        except Exception:  # noqa: BLE001
+                            pass
                     return False, gate, msg
                 else:
                     # Warn but allow

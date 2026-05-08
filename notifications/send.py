@@ -166,6 +166,36 @@ def notify_run_started(run_id, project_name, target, prompt):
                       actions=actions, click_url=f"{ORCHESTRATOR_URL}/status/{run_id}")
 
 
+def notify_intervention(run_id: str, phase: str, base_url: str | None = None) -> None:
+    """Phase 3.1 HITL — fire a notification with approve / reject / edit
+    action buttons. The buttons POST to ``/runs/{run_id}/intervene``.
+
+    ``phase`` describes which boundary tripped (post_planner,
+    post_generator, post_judge, post_optimizer, gate_denied, pre_llm,
+    post_llm) — surfaced in the notification body.
+    """
+    if not NOTIFY_ENABLED:
+        return
+    base = (base_url or ORCHESTRATOR_URL).rstrip("/")
+    intervene = f"{base}/runs/{run_id}/intervene"
+    title = f"⏸ HITL pause: {phase}  ({run_id[:8]})"
+    message = (
+        f"Run paused at **{phase}**. POST {intervene} to continue.\n\n"
+        f"[Approve]({intervene}?action=approve) · "
+        f"[Reject]({intervene}?action=reject)"
+    )
+    actions = [
+        {"type": "http", "label": "Approve", "url": intervene,
+         "method": "POST", "body": '{"action":"approve"}',
+         "headers": {"Content-Type": "application/json"}},
+        {"type": "http", "label": "Reject", "url": intervene,
+         "method": "POST", "body": '{"action":"reject"}',
+         "headers": {"Content-Type": "application/json"}},
+    ]
+    send_notification(title, message, priority=8, tags=["pause_button"],
+                      actions=actions, click_url=intervene)
+
+
 def send_quick_actions_notification():
     """Remote control with all useful API links."""
     if not NOTIFY_ENABLED:

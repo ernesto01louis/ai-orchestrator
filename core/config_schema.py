@@ -283,6 +283,29 @@ class RedisConfig(_FlexModel):
 # Top-level settings model
 # ---------------------------------------------------------------------------
 
+class HITLConfig(_FlexModel):
+    """Phase 3.1 HITL (human-in-the-loop) intervention modes.
+
+    A campaign declares its desired interventionism via
+    ``CampaignTemplate.hitl_mode``; this block controls system-wide
+    defaults and the timeout for each pause.
+
+    ``default_mode`` is the fall-back when a campaign omits
+    ``hitl_mode`` (or for one-shot orchestrations that aren't part of
+    a campaign at all). Always ``"full_auto"`` to keep existing
+    behaviour unchanged.
+
+    ``intervention_timeout_seconds`` bounds how long the orchestration
+    loop waits for an operator's POST to ``/runs/{id}/intervene``
+    before timing out and continuing. Default 1h is opinionated;
+    raise for unattended deployments.
+    """
+
+    default_mode: str = "full_auto"
+    intervention_timeout_seconds: int = 3600
+    poll_interval_seconds: float = 2.0
+
+
 class SmartPauseConfig(_FlexModel):
     """Phase 3.2 SmartPause.
 
@@ -343,3 +366,4 @@ class OrchestratorSettings(_FlexModel):
     budget: BudgetConfig = BudgetConfig()
     sky: SkyConfig = SkyConfig()
     smartpause: SmartPauseConfig = SmartPauseConfig()
+    hitl: HITLConfig = HITLConfig()

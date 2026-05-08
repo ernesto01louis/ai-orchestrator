@@ -357,6 +357,46 @@ description from a vision model when available.
   `orchestrator_active_runs`. **No `run_id` label** (cardinality
   discipline; Grafana correlates by run_id via logs/traces, not labels).
 
+**HITL intervention modes (Phase 3.1):**
+- ``CampaignTemplate.hitl_mode`` selects per-campaign interventionism;
+  default ``"full_auto"`` keeps existing behaviour. SDK 0.1.0a1
+  mirrors the field for typed campaign creation.
+- Five modes — see ``core.hitl._mode_pauses_at_phase`` for the
+  pause-or-skip truth table:
+  | Mode          | Pauses at                                   |
+  |---------------|---------------------------------------------|
+  | full_auto     | (never)                                     |
+  | gate_only     | gate_denied                                 |
+  | checkpoint    | post_planner / post_generator / post_judge / post_optimizer / gate_denied |
+  | step_by_step  | + post_llm                                  |
+  | co_pilot      | + pre_llm  (operator can edit the prompt)   |
+- ``core.hitl.hitl_checkpoint(run_id, phase)`` is the generic gate;
+  flags ``RUN_STATUS[run_id]["paused"]="hitl:<phase>"``, fires
+  ``notify_intervention`` (ntfy + Gotify with Approve / Reject HTTP
+  action buttons), then blocks in ``wait_for_intervention``. Returns
+  the operator's payload (``{action, prompt?}``) so co_pilot's LLM
+  wrappers can thread ``prompt`` overrides into the next call.
+- ``POST /runs/{id}/intervene`` — accepts
+  ``{action: approve|reject|edit, prompt?: str}``. 400 / 404 / 409
+  for malformed bodies / unknown run / queue full. Drains onto the
+  per-run ``INTERVENTION_QUEUE`` AND clears the paused flag (so
+  SmartPause-style pollers wake up too).
+- ``POST /runs/{id}/resume`` — Phase 3.2 minimal unblock; still here
+  as a fallback when ntfy action buttons aren't wired.
+- ``gates.check_gate`` denials route through HITL when the run's
+  ``hitl_mode != "full_auto"``. Operator ``approve`` overrides the
+  gate this once; the rule itself isn't disabled.
+- ``llm.ollama.query_ollama`` and ``query_ollama_structured`` wrap
+  every LLM call with ``hitl_checkpoint(run_id, "pre_llm")`` (covers
+  co_pilot) and ``hitl_checkpoint(run_id, "post_llm")`` (covers
+  step_by_step). ``co_pilot`` ``action=edit`` payloads thread the
+  override prompt into the request.
+- Prom counter ``orchestrator_hitl_total{mode,phase,outcome}``
+  (bounded ~210 combinations).
+- Phase 3.2 SmartPause's ``_get_run_hitl_mode`` stub is now a thin
+  wrapper around ``core.hitl.get_run_hitl_mode`` — SmartPause goes
+  live the moment a campaign sets ``hitl_mode != "full_auto"``.
+
 **SmartPause (Phase 3.2):**
 - Planner schema gains an optional ``confidence: float`` in [0, 1].
   ``planner_agent`` clamps + defaults to 1.0 when missing
@@ -589,7 +629,24 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 
 ---
 
-*Last updated: 2026-05-08, Phase 3.2 (SmartPause) shipped on
+*Last updated: 2026-05-08, Phase 3.1 (HITL intervention modes) shipped
+on `feat/phase3.1-hitl-modes`, tag `v0.3.1-phase3.1`. Seven atomic
+commits (3.1.1 ``hitl_mode`` field on ``CampaignTemplate`` +
+``HITLConfig`` + ``core/hitl.py`` lookup/queue + replaces the SmartPause
+stub with the real lookup; 3.1.2 ``POST /runs/{id}/intervene`` route +
+``notify_intervention`` ntfy actions; 3.1.3 ``hitl_checkpoint`` at the
+four phase boundaries — checkpoint mode goes live; 3.1.4 ``pre_llm`` +
+``post_llm`` wraps in ``llm/ollama.py`` — step_by_step + co_pilot go
+live; 3.1.5 ``gates.check_gate`` denials route through HITL —
+gate_only goes live; 3.1.6 35 regression tests covering the
+mode-pauses-at-phase truth table, the campaigns.json lookup, the
+gate, and the route; 3.1.7 docs + SDK companion 0.1.0a1). +35 net
+new tests (495 → 530). The companion ``ai-orchestrator-client``
+0.1.0a1 (separate repo) mirrors ``CampaignTemplate.hitl_mode`` for
+typed campaign creation. Phase 2.6 (New UI) remains deferred until
+after 3.3.
+
+Phase 3.2 (SmartPause, prior release) shipped on
 `feat/phase3.2-smartpause`, tag `v0.3.2-phase3.2`. Four atomic commits
 (3.2.1 ``SmartPauseConfig`` + ``agents/planner/schema.json`` confidence
 field + ``planner_agent`` clamp normalisation; 3.2.2

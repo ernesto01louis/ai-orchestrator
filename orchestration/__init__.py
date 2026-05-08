@@ -600,17 +600,16 @@ class OrchestrateRequest(BaseModel):
 def _get_run_hitl_mode(run_id: str) -> str:
     """Return the campaign-level ``hitl_mode`` for a given run.
 
-    Phase 3.2 stub: always returns ``"full_auto"``. Phase 3.1 will
-    replace this with a real lookup against ``campaigns.json``,
-    returning the owning campaign's ``CampaignTemplate.hitl_mode``.
+    Phase 3.1 — delegates to ``core.hitl.get_run_hitl_mode`` which
+    scans ``campaigns.json`` for the owning campaign's
+    ``CampaignTemplate.hitl_mode``. Single-shot orchestrations (no
+    parent campaign) get ``HITL_DEFAULT_MODE``.
 
-    The five modes (Phase 3.1):
-        full_auto, gate_only, checkpoint, step_by_step, co_pilot
-    Today every run is treated as ``full_auto``, so SmartPause's
-    threshold check is inert in practice — the infrastructure ships
-    in 3.2 so 3.1 can swap this stub without further plumbing.
+    Kept as a thin wrapper so 3.2's SmartPause callsite remains
+    unchanged.
     """
-    return "full_auto"
+    from core.hitl import get_run_hitl_mode
+    return get_run_hitl_mode(run_id)
 
 
 def _smartpause_check(run_id: str, plan: dict) -> None:
@@ -1183,6 +1182,11 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
         # 3.1 lands, every campaign automatically gains the gate.
         _smartpause_check(run_id, plan)
 
+        # Phase 3.1 HITL — checkpoint mode pauses at every phase boundary.
+        # Inert when hitl_mode is full_auto.
+        from core.hitl import hitl_checkpoint
+        hitl_checkpoint(run_id, "post_planner")
+
         language = plan.get("language", "python").lower()
         project_type = plan.get("project_type", "script")
         entrypoint = plan.get("entrypoint", get_lang_handler(language)["default_entrypoint"])
@@ -1308,6 +1312,16 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                 log(run_id, "all generators failed this iteration")
                 continue
 
+            # Phase 3.1 HITL — pause after generators returned
+            # (checkpoint / step_by_step / co_pilot modes).
+            from core.hitl import hitl_checkpoint
+            hitl_checkpoint(run_id, "post_generator")
+
+            # Phase 3.1 HITL — pause after judge scored (each candidate
+            # already has a judge embedded; this is the boundary where
+            # the operator could veto continuing to the optimizer).
+            hitl_checkpoint(run_id, "post_judge")
+
             # track all candidate results for model stats
             all_candidate_results.extend(candidates)
 
@@ -1340,6 +1354,10 @@ def run_orchestration(req: OrchestrateRequest, run_id: str):
                     req.optimizer_model,
                     run_id
                 ).result()
+
+                # Phase 3.1 HITL — pause after optimizer returned.
+                from core.hitl import hitl_checkpoint
+                hitl_checkpoint(run_id, "post_optimizer")
 
                 if optimized_files and optimized_files != best_files:
 

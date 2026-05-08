@@ -440,12 +440,13 @@ def resume_run(run_id: str) -> dict[str, Any]:
     """Phase 3.2 SmartPause unblock route.
 
     Clears ``RUN_STATUS[run_id]["paused"]`` so the orchestration loop's
-    SmartPause polling wake up and continue. Idempotent — safe to call
+    SmartPause polling wakes up and continues. Idempotent — safe to call
     on a run that isn't paused.
 
-    Phase 3.1 will add the richer ``POST /runs/{run_id}/intervene`` with
-    approve/reject/edit semantics; this route is the minimum needed for
-    SmartPause to be useful in 3.2-only deployments.
+    Phase 3.1 adds the richer ``POST /runs/{run_id}/intervene`` with
+    approve/reject/edit semantics; ``/resume`` remains the minimal
+    unblock for SmartPause-only deployments and as a fallback when ntfy
+    action buttons aren't wired.
     """
     if run_id not in RUN_STATUS:
         raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
@@ -457,6 +458,65 @@ def resume_run(run_id: str) -> dict[str, Any]:
         "run_id": run_id,
         "previously_paused": prior,
         "paused": None,
+    }
+
+
+@router.post("/runs/{run_id}/intervene")
+def intervene_run(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Phase 3.1 HITL intervention route.
+
+    Drains the operator's decision (approve / reject / edit) onto
+    ``core.hitl.INTERVENTION_QUEUE[run_id]`` so the blocked
+    orchestration loop's ``wait_for_intervention`` returns. Also
+    clears ``RUN_STATUS[run_id]["paused"]`` so SmartPause-style
+    pollers wake up.
+
+    Body shape::
+
+        {"action": "approve" | "reject" | "edit",
+         "prompt": "<override>"     // only required for action=edit
+        }
+
+    Returns 404 for unknown run_id, 400 for an invalid action.
+    """
+    if run_id not in RUN_STATUS:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
+
+    action = (body or {}).get("action")
+    if action not in ("approve", "reject", "edit"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"action must be one of approve|reject|edit, got: {action!r}",
+        )
+
+    payload = {"action": action}
+    if action == "edit":
+        prompt = (body or {}).get("prompt")
+        if not prompt or not isinstance(prompt, str):
+            raise HTTPException(
+                status_code=400,
+                detail="action=edit requires a non-empty 'prompt' field",
+            )
+        payload["prompt"] = prompt
+
+    from core.hitl import post_intervention
+
+    try:
+        post_intervention(run_id, payload)
+    except Exception as exc:  # noqa: BLE001 — propagate as 409
+        raise HTTPException(
+            status_code=409,
+            detail=f"intervention queue full or unavailable: {exc}",
+        ) from exc
+
+    # Clear the paused flag so SmartPause's polling loop also unblocks
+    # for runs that were SmartPaused before HITL took over.
+    _update_run_status(run_id, paused=None)
+
+    return {
+        "run_id": run_id,
+        "action": action,
+        "queued": True,
     }
 
 

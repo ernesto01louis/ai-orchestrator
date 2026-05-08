@@ -190,3 +190,28 @@ SMARTPAUSE_TOTAL = Counter(
 
 def observe_smartpause(outcome: str) -> None:
     SMARTPAUSE_TOTAL.labels(outcome=outcome or "unknown").inc()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.1 HITL metrics
+# ---------------------------------------------------------------------------
+# ``mode`` is one of {full_auto, gate_only, checkpoint, step_by_step,
+# co_pilot}. ``phase`` is one of {post_planner, post_generator,
+# post_judge, post_optimizer, post_llm, pre_llm, gate_denied}.
+# ``outcome`` is one of {skipped, paused, approve, reject, edit,
+# timed_out}. Bounded cardinality (~ 5 * 7 * 6 = 210 max combinations
+# across the lifetime of the process).
+
+HITL_TOTAL = Counter(
+    "orchestrator_hitl_total",
+    "HITL gate outcomes by mode, phase, and operator action.",
+    ["mode", "phase", "outcome"],
+)
+
+
+def observe_hitl(*, mode: str, phase: str, outcome: str) -> None:
+    HITL_TOTAL.labels(
+        mode=mode or "unknown",
+        phase=phase or "unknown",
+        outcome=outcome or "unknown",
+    ).inc()
