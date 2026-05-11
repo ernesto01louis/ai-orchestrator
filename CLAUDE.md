@@ -488,6 +488,36 @@ description from a vision model when available.
   `memory_pkg.generate_embedding` and `find_similar` (per-chunk
   matching vs per-document) — that's a separate phase.
 
+**Eval primitive (repo-screening spike, 2026-05-11, DORMANT):**
+- `eval_pkg/scoring.py` exposes `score_response(input, actual_output,
+  *, criteria, ...) -> EvalScore`. Backed by deepeval's G-Eval with
+  an Ollama judge (`llama3:8b` on the Phase 1.3 judge node by default).
+- Named `eval_pkg/` not `eval/` since `eval` shadows the Python
+  builtin (and matches the existing `references_pkg` / `memory_pkg`
+  collision-avoidance pattern).
+- `EvalConfig` schema in `core/config_schema.py`: `enabled` /
+  `judge_model` / `judge_base_url` / `threshold` /
+  `case_timeout_seconds`.
+- Three-condition `is_enabled()` gate (config + deepeval + ollama).
+  Any deepeval / judge error is trapped and returned as a zero-score
+  `EvalScore` with `error=True`; the wrapper never raises.
+- Prom instruments in `core/metrics.py`:
+    * Histogram `orchestrator_eval_score{metric,judge_model}` —
+      observed only for real judge calls (error outcomes do NOT push
+      0.0 in, so dashboard p50/p95 isn't skewed by failures).
+    * Counter `orchestrator_eval_outcomes_total{metric,judge_model,
+      outcome}` with outcome in {passed, failed, disabled,
+      empty_input, error}.
+- Measurement harness at `scripts/measure_eval_quality.py` runs G-Eval
+  against a fixed 8-case canned suite (4 good + 4 bad across
+  arithmetic, definition recall, instruction following, refusal) and
+  prints discrimination accuracy. Exit code 0 if accuracy >= 0.8.
+- **NOT wired into the live pipeline.** The orchestrator never auto-
+  invokes `score_response()` inside a run loop — per-LlmCall eval
+  doubles cost and most calls have no ground truth. Operators invoke
+  the harness manually or build a downstream "eval campaign" concept
+  that runs against a curated test suite.
+
 **Consumer pattern (Phase 3.4):**
 - `examples/example-consumer/` is the reference: a domain-neutral
   trivial-math optimization that imports only `ai-orchestrator-client`
@@ -847,4 +877,17 @@ larger reference docs (CLAUDE/ROADMAP/RUNBOOK/ARCHITECTURE) at
 chunk_size=1024 default → mean 80.0% persistence, win rate 100%. Right
 chunk_size is corpus-shape dependent; the schema default (1024) suits
 PDF-sized reference docs, not vault notes. See
-``scripts/measure_chunking_hit_rate.py``.*
+``scripts/measure_chunking_hit_rate.py``.
+
+2026-05-11 — Repo-screening deepeval spike landed as an available
+primitive. `eval_pkg/scoring.py` wraps deepeval G-Eval with an Ollama
+judge behind a `eval.enabled=false` config gate. NOT wired into the
+live pipeline. Live measurement on a domain-neutral 8-case suite
+(arithmetic, definition recall, instruction following, refusal) with
+the llama3:8b judge: **87.5% discrimination accuracy** (7/8 correct,
+~20s per case wall-clock). All 4 bad outputs correctly fail; one
+overly-terse good answer scored 0.0 on first run (run-to-run variance
+inherent to small judges on short outputs). Promoting eval into a
+"Phase 4.x eval campaign" — a first-class campaign type with curated
+prompts + expected outputs, scoreboard alongside model_stats.json,
+optional evidence-bundle calculator — is a separate phase.*

@@ -391,6 +391,29 @@ shape. Ships as an available primitive only — promoting it into the
 live `memory_pkg.generate_embedding` / `find_similar` pipeline changes
 per-chunk vs per-document matching semantics and is a separate phase.
 
+### deepeval eval primitive — DONE 2026-05-11 (dormant)
+- [x] `eval_pkg/scoring.py` exposes `score_response()` backed by
+      deepeval G-Eval + Ollama judge
+- [x] `EvalConfig` schema in `core/config_schema.py`
+- [x] Prom histogram `orchestrator_eval_score{metric,judge_model}` +
+      counter `orchestrator_eval_outcomes_total{...,outcome}`
+- [x] 13 unit tests (mocked OllamaModel)
+- [x] Stand-alone measurement harness at
+      `scripts/measure_eval_quality.py`
+
+Measurement (8-case canned suite, llama3:8b judge):
+- **87.5% discrimination accuracy** (7/8 correct)
+- Mean wall-clock per case: ~20s
+- All 4 bad outputs correctly fail; one terse good answer scored 0.0
+  (run-to-run variance inherent to small judges; bumped to 0.6 on a
+  separate smoke run)
+
+Verdict: deepeval-with-Ollama discriminates good vs bad outputs
+reliably enough to be useful. Ships as an available primitive only.
+Promoting it to a first-class "eval campaign" type (curated test
+suites, scoreboard alongside model_stats.json, RO-Crate calculator)
+is a separate Phase 4.x effort.
+
 ---
 
 ## Exploratory backlog (999.x — no schedule)
