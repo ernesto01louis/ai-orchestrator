@@ -202,3 +202,11 @@ NOTEDISCOVERY_ENABLED = _settings.note_discovery.enabled
 NOTEDISCOVERY_BASE_URL = _settings.note_discovery.base_url
 NOTEDISCOVERY_TOP_K = int(_settings.note_discovery.top_k)
 NOTEDISCOVERY_TIMEOUT_SECONDS = int(_settings.note_discovery.timeout_seconds)
+
+# Repo-screening spike (2026-05-11): chonkie chunking primitive.
+# Available via ``core.chunking.chunk_text``; dormant by default —
+# no callsite in the orchestrator wires it in yet.
+CHUNKING_ENABLED = _settings.chunking.enabled
+CHUNKING_CHUNKER = _settings.chunking.chunker
+CHUNKING_CHUNK_SIZE = int(_settings.chunking.chunk_size)
+CHUNKING_CHUNK_OVERLAP = int(_settings.chunking.chunk_overlap)
