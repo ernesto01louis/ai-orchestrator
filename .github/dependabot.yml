@@ -1,0 +1,80 @@
+# Dependabot config — recurring dep-update item from ROADMAP.md.
+#
+# Cadence: weekly on Mondays at 06:00 UTC for both ecosystems. PRs
+# stack up to 5 per ecosystem before Dependabot pauses; merge or close
+# to unblock. Major-version bumps require manual review (no auto-merge
+# rule wired here on purpose).
+#
+# pip handles the orchestrator's runtime deps; npm handles the
+# `ui/console/` operator console (Phase 2.6).
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: "chore(deps-py)"
+    groups:
+      # Group patch + minor bumps together — major versions stay
+      # standalone so each gets its own review.
+      runtime-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Phase 2.5 SkyPilot is range-pinned (skypilot[runpod,vast]>=0.12,<0.13).
+      # Don't auto-bump past the upper bound — major releases need a
+      # manual compatibility check against the burst route + idle daemon.
+      - dependency-name: "skypilot"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: npm
+    directory: "/ui/console"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    commit-message:
+      prefix: "chore(deps-ui)"
+    groups:
+      runtime-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # React major versions touch the whole tree — bumps need manual
+      # review (Strict Mode behaviour, render scheduler, deprecations).
+      - dependency-name: "react"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "react-dom"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(deps-ci)"
