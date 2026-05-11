@@ -263,3 +263,47 @@ def observe_chunking(*, site: str, chunker: str, count: int) -> None:
         site=site or "unknown",
         chunker=chunker or "unknown",
     ).inc(count)
+
+
+# ---------------------------------------------------------------------------
+# Repo-screening spike (2026-05-11) — deepeval scoring metrics
+# ---------------------------------------------------------------------------
+# Cardinality bounded:
+# - ``metric`` is one of the small handful of G-Eval rubrics in use
+#   (typically named per suite; today expected: {"g_eval", "correctness",
+#   "instruction_following"}).
+# - ``judge_model`` is the Ollama model name (one of a few; the orchestrator
+#   doesn't dynamically generate model names).
+# - ``outcome`` for the counter is one of {passed, failed, disabled,
+#   empty_input, error}.
+# No run_id / campaign_id labels.
+
+EVAL_SCORE = Histogram(
+    "orchestrator_eval_score",
+    "G-Eval scores returned by the deepeval primitive, by metric and judge.",
+    ["metric", "judge_model"],
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
+EVAL_OUTCOMES_TOTAL = Counter(
+    "orchestrator_eval_outcomes_total",
+    "G-Eval call outcomes by metric, judge, and pass/fail/error bucket.",
+    ["metric", "judge_model", "outcome"],
+)
+
+
+def observe_eval_score(
+    *, metric: str, judge_model: str, score: float, outcome: str,
+) -> None:
+    """Record one G-Eval call. Score histogram is observed only for
+    real judge calls (outcome in {passed, failed}); skip / error
+    outcomes still bump the counter so harness operators see them."""
+    safe_metric = metric or "unknown"
+    safe_judge = judge_model or "unknown"
+    safe_outcome = outcome or "unknown"
+    EVAL_OUTCOMES_TOTAL.labels(
+        metric=safe_metric, judge_model=safe_judge, outcome=safe_outcome,
+    ).inc()
+    if safe_outcome in {"passed", "failed"}:
+        clamped = max(0.0, min(1.0, float(score)))
+        EVAL_SCORE.labels(metric=safe_metric, judge_model=safe_judge).observe(clamped)
