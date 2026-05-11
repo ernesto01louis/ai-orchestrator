@@ -501,6 +501,12 @@ description from a vision model when available.
 - Three-condition `is_enabled()` gate (config + deepeval + ollama).
   Any deepeval / judge error is trapped and returned as a zero-score
   `EvalScore` with `error=True`; the wrapper never raises.
+- **Opt-in install:** deepeval lives in `requirements-eval.txt` (not
+  the base `requirements.txt`) because deepeval 4.x pins
+  `tabulate<0.10.0` which conflicts with the `tabulate==0.10.0`
+  base pin (pymupdf4llm needs the newer one). Operators run
+  `pip install -r requirements-eval.txt` to activate. Same shape as
+  `requirements-cloud.txt` for SkyPilot.
 - Prom instruments in `core/metrics.py`:
     * Histogram `orchestrator_eval_score{metric,judge_model}` —
       observed only for real judge calls (error outcomes do NOT push

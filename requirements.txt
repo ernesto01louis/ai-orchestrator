@@ -113,7 +113,10 @@ supabase-auth==2.28.3
 supabase-functions==2.28.3
 supabase==2.28.3
 sympy==1.14.0
-tabulate==0.10.0
+# Loosened from `==0.10.0` 2026-05-11 so the opt-in eval extras
+# (deepeval 4.x needs `<0.10`) can install alongside the base. pymupdf4llm
+# (the only base-requirements user of tabulate) is happy with 0.9+.
+tabulate>=0.9,<0.11
 tenacity==9.1.4
 text-unidecode==1.3
 tomli==2.4.1
@@ -146,13 +149,19 @@ alembic>=1.13,<2
 # in yet. See ``core/chunking.py``.
 chonkie>=1.6,<2
 
-# Repo-screening spike (2026-05-11) — deepeval LLM output evaluation.
-# Apache-2.0, first-class Ollama judge support via ``OllamaModel``.
-# The ``ollama`` python client is a deepeval optional that has to be
-# installed alongside it. Dormant by default; never invoked inside a
-# run loop. See ``eval_pkg/scoring.py``.
-deepeval>=4.0,<5
-ollama>=0.6,<1
+# Repo-screening spike (2026-05-11) — deepeval LLM output evaluation
+# is OPT-IN. Lives in ``requirements-eval.txt`` for the same reason
+# SkyPilot does: heavy dep tree (openai, posthog, pyfiglet, sentry-sdk,
+# pytest-xdist, aiohttp, ...) for a primitive that ships DORMANT and
+# is never invoked inside a run loop. Operators who want the eval
+# primitive run::
+#
+#     pip install -r requirements-eval.txt
+#
+# Without that, ``eval_pkg.scoring.is_enabled()`` reports False and
+# every score_response() call returns a zero-score EvalScore with
+# error=True. The orchestrator boots fine; unit tests pass (they mock
+# OllamaModel). See ``eval_pkg/scoring.py``.
 
 # Phase 2.5 — SkyPilot for cloud-burst GPU is OPT-IN. Lives in
 # ``requirements-cloud.txt`` because its dep tree (boto3 / pandas /

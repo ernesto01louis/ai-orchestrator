@@ -1,0 +1,28 @@
+# requirements-eval.txt — opt-in extras for the repo-screening
+# deepeval eval primitive (2026-05-11).
+#
+# Why a separate file? deepeval 4.x pins ``tabulate<0.10.0``, which
+# conflicts with the ``tabulate==0.10.0`` pin in ``requirements.txt``
+# (pymupdf4llm needs the newer one). Carrying deepeval in the main
+# file would block ``pip install -r requirements.txt`` on a fresh CI
+# runner. Splitting keeps the base install reproducible and lets
+# operators who want the eval primitive run::
+#
+#     pip install -r requirements-eval.txt
+#
+# Without this file installed:
+# * ``eval_pkg.scoring.is_enabled()`` reports False regardless of config.
+# * Every ``score_response()`` call returns a zero-score EvalScore
+#   with ``error=True`` and outcome ``disabled``.
+# * The orchestrator boots fine; unit tests pass (they mock OllamaModel).
+#
+# After installing, flip ``eval.enabled=true`` in ``config.json``
+# and the ``score_response()`` primitive becomes live against the
+# Ollama judge at ``eval.judge_base_url``.
+#
+# Apache-2.0. First-class Ollama judge support via ``OllamaModel``.
+# The ``ollama`` python client is a deepeval optional that has to be
+# installed alongside it (deepeval 4.0 raises DeepEvalError on
+# OllamaModel construction without it).
+deepeval>=4.0,<5
+ollama>=0.6,<1
