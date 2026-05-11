@@ -801,4 +801,12 @@ from Phase 1.7 still gates everything except `/health`, `/metrics`,
 six-entry public-path bypass set in `core/auth.DEFAULT_PUBLIC_PATHS`).
 When you complete a phase or
 significantly change architecture, update this file before starting
-the next work item.*
+the next work item.
+
+2026-05-11 — Repo-screening pass added four roadmap entries (no code):
+Phase 2.5.1 (vLLM serving inside SkyPilot bursts, dormant until 2.5
+activates), Phase 4.x (prollytree-backed memory branching for HITL
+co_pilot — backlog only), and two 999.x backlog entries (`skill_dispatch`
+agent role from deer-flow, HITL partial-state preservation from
+agentscope). See `/root/.claude/plans/ill-paste-some-github-spicy-fern.md`
+for the full screening rationale.*
