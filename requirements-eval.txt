@@ -1,12 +1,12 @@
 # requirements-eval.txt — opt-in extras for the repo-screening
 # deepeval eval primitive (2026-05-11).
 #
-# Why a separate file? deepeval 4.x pins ``tabulate<0.10.0``, which
-# conflicts with the ``tabulate==0.10.0`` pin in ``requirements.txt``
-# (pymupdf4llm needs the newer one). Carrying deepeval in the main
-# file would block ``pip install -r requirements.txt`` on a fresh CI
-# runner. Splitting keeps the base install reproducible and lets
-# operators who want the eval primitive run::
+# Why a separate file? Same rationale as ``requirements-cloud.txt``
+# for SkyPilot: deepeval drags in a heavy dep tree (openai, posthog,
+# pyfiglet, sentry-sdk, pytest-xdist, aiohttp, ...) for a primitive
+# that ships DORMANT and is never invoked inside a run loop. Splitting
+# keeps the base install lean and lets operators who want the eval
+# primitive run::
 #
 #     pip install -r requirements-eval.txt
 #
