@@ -379,6 +379,32 @@ class ChunkingConfig(_FlexModel):
     chunk_overlap: int = 128
 
 
+class EvalConfig(_FlexModel):
+    """Repo-screening spike (2026-05-11): deepeval-based LLM output eval.
+
+    Ships dormant — ``eval.enabled=false`` keeps the primitive inert.
+    Even when enabled, the orchestrator never auto-evaluates inside a
+    run (would double LLM cost and most calls lack ground truth). Use
+    the ``scripts/measure_eval_quality.py`` harness or ``eval_pkg.scoring``
+    helpers explicitly from a fixed-suite eval campaign.
+
+    Judge model defaults to ``llama3:8b`` on the Phase 1.3 judge node
+    (``192.168.2.219:11434``); raise to ``qwen2.5:72b`` for stricter
+    judging at ~5x the wall-clock cost per case.
+    """
+
+    enabled: bool = False
+    judge_model: str = "llama3:8b"
+    judge_base_url: str = "http://192.168.2.219:11434"
+    # G-Eval pass/fail threshold in [0, 1]. 0.5 mirrors the deepeval
+    # default. Tune per-suite.
+    threshold: float = 0.5
+    # Per-case timeout. Live smoke shows ~15s/case on llama3:8b; the
+    # 72b judge approaches 60s. 120s leaves headroom without letting
+    # a wedged judge hang a harness forever.
+    case_timeout_seconds: int = 120
+
+
 class OrchestratorSettings(_FlexModel):
     """Validated view of config.json.
 
@@ -416,3 +442,4 @@ class OrchestratorSettings(_FlexModel):
     hitl: HITLConfig = HITLConfig()
     note_discovery: NoteDiscoveryConfig = NoteDiscoveryConfig()
     chunking: ChunkingConfig = ChunkingConfig()
+    eval: EvalConfig = EvalConfig()

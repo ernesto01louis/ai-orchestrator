@@ -210,3 +210,13 @@ CHUNKING_ENABLED = _settings.chunking.enabled
 CHUNKING_CHUNKER = _settings.chunking.chunker
 CHUNKING_CHUNK_SIZE = int(_settings.chunking.chunk_size)
 CHUNKING_CHUNK_OVERLAP = int(_settings.chunking.chunk_overlap)
+
+# Repo-screening spike (2026-05-11): deepeval-based LLM output eval.
+# Available via ``eval_pkg.scoring.score_response``; dormant by default,
+# never auto-invoked from a run (would double LLM cost). Operators
+# call the harness explicitly from a curated test suite.
+EVAL_ENABLED = _settings.eval.enabled
+EVAL_JUDGE_MODEL = _settings.eval.judge_model
+EVAL_JUDGE_BASE_URL = _settings.eval.judge_base_url
+EVAL_THRESHOLD = float(_settings.eval.threshold)
+EVAL_CASE_TIMEOUT_SECONDS = int(_settings.eval.case_timeout_seconds)
