@@ -239,3 +239,27 @@ NOTEDISCOVERY_QUERY_DURATION = Histogram(
 def observe_note_discovery_query(outcome: str, duration_seconds: float) -> None:
     NOTEDISCOVERY_QUERIES_TOTAL.labels(outcome=outcome or "unknown").inc()
     NOTEDISCOVERY_QUERY_DURATION.observe(max(0.0, float(duration_seconds)))
+
+
+# ---------------------------------------------------------------------------
+# Repo-screening spike (2026-05-11) — chonkie chunking metrics
+# ---------------------------------------------------------------------------
+# ``site`` is one of the small set of call origins (today expected:
+# {"references", "vault", "measurement", "unspecified"}); ``chunker``
+# is the chonkie variant ({"recursive"} today). Bounded cardinality.
+# No ``run_id`` / ``campaign_id`` labels.
+
+CHUNKING_CHUNKS_TOTAL = Counter(
+    "orchestrator_chunking_chunks_total",
+    "Total chunks emitted by core.chunking.chunk_text, by site and chunker.",
+    ["site", "chunker"],
+)
+
+
+def observe_chunking(*, site: str, chunker: str, count: int) -> None:
+    if count <= 0:
+        return
+    CHUNKING_CHUNKS_TOTAL.labels(
+        site=site or "unknown",
+        chunker=chunker or "unknown",
+    ).inc(count)

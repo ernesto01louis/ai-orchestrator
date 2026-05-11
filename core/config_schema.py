@@ -352,6 +352,33 @@ class SmartPauseConfig(_FlexModel):
     poll_interval_seconds: float = 2.0
 
 
+class ChunkingConfig(_FlexModel):
+    """Repo-screening spike (2026-05-11): chonkie-backed text chunking.
+
+    Currently dormant. The orchestrator embeds whole texts today
+    (``memory_pkg.generate_embedding`` / ``references_pkg`` PDF→md);
+    chunking exists as an available primitive in ``core/chunking.py``
+    for future use (RAG, finer-grained embedding-cache stability under
+    one-line edits).
+
+    Flipping ``enabled=true`` does not by itself change behaviour —
+    callsites must opt in explicitly via ``core.chunking.chunk_text``.
+    """
+
+    enabled: bool = False
+    # Chonkie chunker variant. Only ``recursive`` is wired today; the
+    # field is kept as a Literal so adding more variants is a controlled
+    # extension rather than a wildcard string.
+    chunker: str = "recursive"
+    # Target chunk size in characters. 1024 is conservative for
+    # ``nomic-embed-text`` (8192-token context); raise once measurement
+    # shows we're cache-thrashing on small docs.
+    chunk_size: int = 1024
+    # Character overlap between adjacent chunks — keeps cross-boundary
+    # semantics intact for nearest-neighbour search.
+    chunk_overlap: int = 128
+
+
 class OrchestratorSettings(_FlexModel):
     """Validated view of config.json.
 
@@ -388,3 +415,4 @@ class OrchestratorSettings(_FlexModel):
     smartpause: SmartPauseConfig = SmartPauseConfig()
     hitl: HITLConfig = HITLConfig()
     note_discovery: NoteDiscoveryConfig = NoteDiscoveryConfig()
+    chunking: ChunkingConfig = ChunkingConfig()

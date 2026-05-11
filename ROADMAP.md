@@ -300,6 +300,20 @@ Ships dormant — `postgres.enabled=false` default. Operator action: stand up ne
 
 Ships **dormant** (`sky.enabled=false` default). Operator action: configure provider creds (e.g. `RUNPOD_API_KEY`), run `sky check`, flip `sky.enabled=true`, restart orchestrator.
 
+### 2.5.1 vLLM serving inside SkyPilot bursts — DORMANT, depends on 2.5 activation
+- [ ] Swap `sky/llm-burst.yaml` from Ollama to vLLM's OpenAI-compatible container — Ollama already exposes `/v1/chat/completions` so the client-side adapter is near-zero
+- [ ] Add a tiny adapter shim in `llm/` (likely 1 file, < 100 lines) for the OpenAI-shape endpoints when the burst handle is the active LLM target
+- [ ] Leave the local LXC stack on Ollama — single-stream serial Prefect calls don't benefit from vLLM; GGUF support in vLLM is officially "experimental" with an active deprecation RFC (vllm-project/vllm#39583)
+
+Rationale: vLLM beats Ollama ~2-5× on $/token for batched workloads on
+rented GPUs (8+ concurrent users, e.g. an eval harness blasting 1000
+prompts at a RunPod A100). For single-stream serial planner→generator→
+judge calls on the local LXC, Ollama wins or ties.
+
+Trigger: activates the day `sky.enabled=true` AND a paid-provider key
+(e.g. `RUNPOD_API_KEY`) is configured. Until then, this entry sits
+dormant — no code, no LXC.
+
 ### 2.6 New UI
 - [ ] Framework decision (React/Vue/Svelte)
 - [ ] Thin client, REST + WebSocket only
@@ -332,6 +346,75 @@ Ships **dormant** (`sky.enabled=false` default). Operator action: configure prov
 
 ### 3.5 (Removed) Multi-orchestrator federation
 - Per VISION.md: "probably unnecessary." Dropped.
+
+---
+
+## Phase 4 — Exploratory (post-2.6, not committed)
+
+Items here have a roadmap entry but no concrete plan and no schedule.
+They land in their own phase only if a downstream need surfaces.
+
+### 4.x Explore prollytree-backed memory branching for HITL co_pilot mode
+When the operator rejects a planner output in HITL `co_pilot` mode,
+today the run pauses with no way to fork. With branchable memory
+(memoir's prollytree model — content-addressed Merkle B-tree, Dolt
+family) the operator could fork the agent's context and try alt
+prompts on a side branch without losing the original branch's state.
+
+Risk: integration lands in `memory_pkg/` (~1970 lines, the entire
+5-layer memory system); memoir is single-author and 9 months old at
+the time of this entry. **Backlog entry only — no spike planned.**
+
+Reference: https://github.com/zhangfengcdt/memoir
+
+---
+
+## Repo-screening spikes (one-off, completed)
+
+### Chonkie chunking primitive — DONE 2026-05-11 (dormant)
+- [x] `core/chunking.py` wrapper around `chonkie.RecursiveChunker` with
+      a three-condition `is_enabled()` gate (config flag + import probe)
+- [x] `ChunkingConfig` schema in `core/config_schema.py`
+- [x] Prom counter `orchestrator_chunking_chunks_total{site,chunker}`
+- [x] 11 unit tests (suite 547 → 558)
+- [x] Stand-alone measurement harness at
+      `scripts/measure_chunking_hit_rate.py`
+
+Measurement (one-line edit on real corpora):
+- 747-note vault corpus @ chunk_size=128: **80.6%** mean cache-key
+  persistence, 100% win rate vs naive whole-text hashing
+- 7 large reference docs @ chunk_size=1024 default: **80.0%** mean
+  persistence, 100% win rate
+
+Verdict: chunking works as a technique when chunk_size matches corpus
+shape. Ships as an available primitive only — promoting it into the
+live `memory_pkg.generate_embedding` / `find_similar` pipeline changes
+per-chunk vs per-document matching semantics and is a separate phase.
+
+---
+
+## Exploratory backlog (999.x — no schedule)
+
+Surfaced from the 2026-05-11 repo-screening pass. Promoted to a
+numbered phase only when a downstream need makes it worth the work.
+
+### 999.1 `skill_dispatch` agent role
+Inspired by deer-flow's progressive skill loading: skills materialized
+on-demand at the agent's request rather than baked into the system
+prompt. Would mirror the existing `tool_dispatch` agent role. Worth
+investigating before adding new skills to `agents/` — the current
+"all skills in system prompt" pattern doesn't scale past a few dozen.
+
+Reference: https://github.com/bytedance/deer-flow
+
+### 999.2 HITL partial-state preservation on reject
+Inspired by agentscope's realtime-interrupt-with-memory-preservation
+pattern. When the operator rejects a step in HITL modes (`gate_only`,
+`checkpoint`, `step_by_step`, `co_pilot`), partial reasoning state
+from the interrupted task is currently discarded. Likely a ~50-line
+surgical addition to `core/hitl.py`. Low blast radius.
+
+Reference: https://github.com/agentscope-ai/agentscope
 
 ---
 
