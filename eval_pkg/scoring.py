@@ -124,7 +124,7 @@ def score_response(
     # (matches the dormant-ship pattern).
     from deepeval.metrics import GEval
     from deepeval.models import OllamaModel
-    from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+    from deepeval.test_case import LLMTestCase, SingleTurnParams
 
     try:
         ollama_judge = OllamaModel(model=judge, base_url=base, temperature=0.0)
@@ -132,8 +132,8 @@ def score_response(
             name=metric_name,
             criteria=criteria,
             evaluation_params=[
-                LLMTestCaseParams.INPUT,
-                LLMTestCaseParams.ACTUAL_OUTPUT,
+                SingleTurnParams.INPUT,
+                SingleTurnParams.ACTUAL_OUTPUT,
             ],
             model=ollama_judge,
             threshold=thresh,
