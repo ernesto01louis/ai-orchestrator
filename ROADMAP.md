@@ -369,6 +369,30 @@ Reference: https://github.com/zhangfengcdt/memoir
 
 ---
 
+## Repo-screening spikes (one-off, completed)
+
+### Chonkie chunking primitive — DONE 2026-05-11 (dormant)
+- [x] `core/chunking.py` wrapper around `chonkie.RecursiveChunker` with
+      a three-condition `is_enabled()` gate (config flag + import probe)
+- [x] `ChunkingConfig` schema in `core/config_schema.py`
+- [x] Prom counter `orchestrator_chunking_chunks_total{site,chunker}`
+- [x] 11 unit tests (suite 547 → 558)
+- [x] Stand-alone measurement harness at
+      `scripts/measure_chunking_hit_rate.py`
+
+Measurement (one-line edit on real corpora):
+- 747-note vault corpus @ chunk_size=128: **80.6%** mean cache-key
+  persistence, 100% win rate vs naive whole-text hashing
+- 7 large reference docs @ chunk_size=1024 default: **80.0%** mean
+  persistence, 100% win rate
+
+Verdict: chunking works as a technique when chunk_size matches corpus
+shape. Ships as an available primitive only — promoting it into the
+live `memory_pkg.generate_embedding` / `find_similar` pipeline changes
+per-chunk vs per-document matching semantics and is a separate phase.
+
+---
+
 ## Exploratory backlog (999.x — no schedule)
 
 Surfaced from the 2026-05-11 repo-screening pass. Promoted to a

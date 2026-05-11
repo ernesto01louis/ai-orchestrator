@@ -464,6 +464,30 @@ description from a vision model when available.
   outcomes in {paused, resumed, timed_out, skipped_full_auto,
   skipped_above, skipped_disabled}.
 
+**Chunking primitive (repo-screening spike, 2026-05-11, DORMANT):**
+- `core/chunking.py` exposes `chunk_text(text, *, site=...) -> list[str]`
+  and `chunk_texts(...)` backed by `chonkie.RecursiveChunker`. The
+  dormant path (`chunking.enabled=false`, default) returns `[text]` as
+  a single-element list so callers can use `chunk_text(...)`
+  unconditionally without branching on the gate.
+- `ChunkingConfig` Pydantic model in `core/config_schema.py` exposes
+  `enabled` / `chunker` / `chunk_size` / `chunk_overlap`. Default
+  `chunk_size=1024` suits PDF-sized reference docs; vault-shaped
+  corpora benefit from a smaller value (measurement showed `128` was
+  the sweet spot for the 747-note vault).
+- Prom counter `orchestrator_chunking_chunks_total{site,chunker}` —
+  bumped from `chunk_text(...)` only when chunking is enabled and
+  produces ≥1 chunk. Bounded cardinality (no `run_id` /
+  `campaign_id`).
+- Measurement harness at `scripts/measure_chunking_hit_rate.py`
+  compares chonkie cache-key persistence vs naive whole-text hashing
+  under a one-line edit on any corpus directory. Exit code 0 if
+  mean persistence > 50%.
+- **NOT wired into the live embedding pipeline.** Promoting chunking
+  past "available primitive" changes cache-key semantics in
+  `memory_pkg.generate_embedding` and `find_similar` (per-chunk
+  matching vs per-document) — that's a separate phase.
+
 **Consumer pattern (Phase 3.4):**
 - `examples/example-consumer/` is the reference: a domain-neutral
   trivial-math optimization that imports only `ai-orchestrator-client`
@@ -809,4 +833,18 @@ activates), Phase 4.x (prollytree-backed memory branching for HITL
 co_pilot — backlog only), and two 999.x backlog entries (`skill_dispatch`
 agent role from deer-flow, HITL partial-state preservation from
 agentscope). See `/root/.claude/plans/ill-paste-some-github-spicy-fern.md`
-for the full screening rationale.*
+for the full screening rationale.
+
+2026-05-11 — Chonkie chunking spike landed as an available primitive.
+``core/chunking.py`` wraps ``chonkie.RecursiveChunker`` behind a
+``chunking.enabled=false`` config gate. NOT wired into the live
+embedding pipeline — promoting chunking past "available primitive"
+means changing cache-key semantics across ``memory_pkg``, which is
+a separate phase. Measurement on the 747-note vault corpus at
+chunk_size=128 → mean 80.6% cache-key persistence under a one-line
+edit, vs 0% for the naive whole-text baseline (win rate 100%). On
+larger reference docs (CLAUDE/ROADMAP/RUNBOOK/ARCHITECTURE) at
+chunk_size=1024 default → mean 80.0% persistence, win rate 100%. Right
+chunk_size is corpus-shape dependent; the schema default (1024) suits
+PDF-sized reference docs, not vault notes. See
+``scripts/measure_chunking_hit_rate.py``.*
