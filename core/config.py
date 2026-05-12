@@ -220,3 +220,12 @@ EVAL_JUDGE_MODEL = _settings.eval.judge_model
 EVAL_JUDGE_BASE_URL = _settings.eval.judge_base_url
 EVAL_THRESHOLD = float(_settings.eval.threshold)
 EVAL_CASE_TIMEOUT_SECONDS = int(_settings.eval.case_timeout_seconds)
+
+# Repo-screening spike (2026-05-12): firecrawl-backed web reference
+# ingestion. Available via ``references_pkg.web.ingest_url``; dormant
+# by default — no autonomous crawling. Operator/tool invocations
+# only. See ``scripts/install_firecrawl.sh`` for the LXC bring-up.
+WEB_INGEST_ENABLED = _settings.web_ingest.enabled
+WEB_INGEST_BASE_URL = _settings.web_ingest.base_url
+WEB_INGEST_TIMEOUT_SECONDS = int(_settings.web_ingest.timeout_seconds)
+WEB_INGEST_SKIP_IF_EXISTS = bool(_settings.web_ingest.skip_if_exists)
