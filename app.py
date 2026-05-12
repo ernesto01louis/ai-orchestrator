@@ -181,6 +181,21 @@ async def _lifespan(app_instance):
     except Exception as e:
         print(f"WARNING: NoteDiscovery healthcheck failed at startup: {e}")
 
+    # Repo-screening spike (2026-05-12) firecrawl healthcheck. No-op
+    # when ``web_ingest.enabled=false``. Logs a warning if the operator
+    # flipped the flag but LXC 206 is unreachable; never fatal —
+    # ``references_pkg.web.ingest_url`` fail-tolerates a down firecrawl
+    # on every call.
+    try:
+        from references_pkg.web import healthcheck as web_health, is_enabled as web_enabled  # noqa: PLC0415
+        if web_enabled():
+            if web_health():
+                print("firecrawl: reachable")
+            else:
+                print("WARNING: web_ingest enabled but firecrawl healthcheck failed; ingest_url will return http_error")
+    except Exception as e:
+        print(f"WARNING: firecrawl healthcheck failed at startup: {e}")
+
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield
