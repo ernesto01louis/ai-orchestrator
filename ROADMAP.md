@@ -391,6 +391,30 @@ shape. Ships as an available primitive only — promoting it into the
 live `memory_pkg.generate_embedding` / `find_similar` pipeline changes
 per-chunk vs per-document matching semantics and is a separate phase.
 
+### firecrawl web ingest primitive — DONE 2026-05-12 (dormant)
+- [x] `references_pkg/web.py` exposes `ingest_url(url) -> IngestResult`
+      backed by self-hosted firecrawl `/v2/scrape` on LXC 206
+- [x] `WebIngestConfig` schema in `core/config_schema.py`
+- [x] Prom counter `orchestrator_web_ingest_total{outcome}` +
+      histogram `orchestrator_web_ingest_duration_seconds`
+- [x] Startup healthcheck in `app.py:_lifespan` (NoteDiscovery shape)
+- [x] 19 unit tests (mocked firecrawl HTTP)
+- [x] `scripts/install_firecrawl.sh` Proxmox-host provisioning script
+- [x] LXC 206 LIVE — `firecrawl-server` at 192.168.2.189:3002
+
+Measurement (live end-to-end against the running LXC):
+- example.com — 0.5s, 180 bytes markdown
+- PEP 8 — 1.6s, 57 KB markdown
+- Python json docs — 0.9s, 42 KB markdown
+- 3/3 success rate, frontmatter intact, source URLs preserved
+
+Verdict: firecrawl self-hosts cleanly on a single 8 GB LXC and
+returns clean markdown suitable for the existing
+`load_reference_content` pipeline. Ships as an available primitive
+only — no autonomous crawling, no agent-loop callsite. Promoting to
+a planner research step (Phase 3.3 NoteDiscovery shape) is a
+separate phase.
+
 ### deepeval eval primitive — DONE 2026-05-11 (dormant)
 - [x] `eval_pkg/scoring.py` exposes `score_response()` backed by
       deepeval G-Eval + Ollama judge
