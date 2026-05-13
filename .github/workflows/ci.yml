@@ -25,7 +25,7 @@ jobs:
           # here so the mock-based unit tests in tests/test_eval_scoring.py
           # can patch `deepeval.*` symbols.
           pip install -r requirements-eval.txt
-          pip install pytest pytest-asyncio pytest-mock httpx ruff mypy types-requests types-PyYAML
+          pip install pytest pytest-asyncio pytest-mock pytest-cov httpx ruff mypy types-requests types-PyYAML
           # Phase 3.4 — example consumer smoke tests load the SDK to
           # validate the public contract from the consumer's side. The
           # orchestrator never imports it at runtime; this is a
@@ -40,8 +40,29 @@ jobs:
       - name: Type-check (mypy)
         run: mypy core llm notifications tools execution || echo "mypy non-blocking in Phase 0"
 
-      - name: Run unit tests (default suite excludes prefect_real via addopts)
-        run: pytest -q
+      - name: Run unit tests with coverage gate (excludes prefect_real via addopts)
+        # Coverage covers every platform package under measurement (skips
+        # tests/, agents/, scripts/, examples/, eval_pkg/). --cov-fail-under
+        # starts at 50% — well below the suite's real coverage — so the
+        # initial gate ratchets *up* over time via PRs that raise it.
+        # ROADMAP success criterion is ≥80%; we stair-step there rather
+        # than landing one giant test-bomb PR. Audit Section D.7.
+        run: |
+          pytest -q \
+            --cov=core --cov=llm --cov=notifications --cov=tools \
+            --cov=execution --cov=orchestration --cov=api --cov=evidence \
+            --cov=memory_pkg --cov=references_pkg --cov=agents \
+            --cov=manifest --cov=prefect_io --cov=cli \
+            --cov-report=term --cov-report=xml --cov-fail-under=50
+
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Show test summary
         if: always()
