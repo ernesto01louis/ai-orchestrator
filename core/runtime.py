@@ -330,13 +330,27 @@ def _ws_subscriber_loop() -> None:
     pubsub = None
     backoff_seconds = 1.0
     max_backoff_seconds = 30.0
+    # Give up if Redis stays unreachable past this many consecutive
+    # poll/subscribe failures — the supervisor should not spin a
+    # daemon thread forever on a permanently-dead Redis. With the
+    # capped backoff above, MAX_CONSECUTIVE_FAILURES=10 covers ~5
+    # minutes of degraded service before the subscriber exits and
+    # lets ``start_ws_broadcast_subscriber`` re-spawn on the next
+    # operator call.
+    MAX_CONSECUTIVE_FAILURES = 10
+    consecutive_failures = 0
 
     while True:
         if pubsub is None:
             try:
                 pubsub = _try_subscribe()
                 # Successful re-subscribe after at least one failure
-                # counts as a restart event.
+                # counts as a restart event. Note: we deliberately do
+                # NOT reset ``consecutive_failures`` here — only a
+                # successful poll counts as "things are working again".
+                # Otherwise a subscribe-OK-then-poll-fail cycle (e.g.
+                # the test helper that scripts a sentinel exception)
+                # would spin forever.
                 if backoff_seconds > 1.0:
                     observe_redis_subscriber_restart()
                 backoff_seconds = 1.0
@@ -346,6 +360,13 @@ def _ws_subscriber_loop() -> None:
                     "redis_ws_subscribe_failed error=%s sleep=%.1fs",
                     exc, backoff_seconds,
                 )
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    _logger.warning(
+                        "redis_ws_subscriber giving up after %d consecutive failures",
+                        consecutive_failures,
+                    )
+                    return
                 time.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
                 continue
@@ -355,9 +376,17 @@ def _ws_subscriber_loop() -> None:
         except Exception as exc:  # noqa: BLE001 — connection death recoverable
             observe_redis_subscriber_error()
             _logger.warning("redis_ws_subscriber_died error=%s", exc)
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                _logger.warning(
+                    "redis_ws_subscriber giving up after %d consecutive failures",
+                    consecutive_failures,
+                )
+                return
             pubsub = None  # force re-subscribe on next iteration
             continue
         observe_redis_subscriber_tick()
+        consecutive_failures = 0  # any successful poll resets the counter
         if raw is None:
             continue
         if raw.get("type") != "message":
