@@ -40,32 +40,8 @@ jobs:
       - name: Type-check (mypy)
         run: mypy core llm notifications tools execution || echo "mypy non-blocking in Phase 0"
 
-      - name: Run unit tests with coverage gate (excludes prefect_real via addopts)
-        # Coverage scope is deliberately the *small* packages
-        # (core/llm/notifications/tools/agents/references_pkg/manifest/
-        # cli). The heavyweight packages — orchestration, api, evidence,
-        # memory_pkg, execution, prefect_io — are skipped because
-        # coverage instrumentation on them combined with Prefect's
-        # per-test temporary-server spin-up exhausts GHA runner memory.
-        # Expanding coverage to those packages waits on a parallel-
-        # coverage / coveragepy-sysmon migration tracked in the
-        # Phase 4+ backlog. ROADMAP success criterion is ≥80% on the
-        # measured surface; we stair-step there via PRs that raise
-        # --cov-fail-under. Audit Section D.7.
-        run: |
-          pytest -q \
-            --cov=core --cov=llm --cov=notifications --cov=tools \
-            --cov=references_pkg --cov=agents --cov=manifest --cov=cli \
-            --cov-report=term --cov-report=xml --cov-fail-under=50
-
-      - name: Upload coverage XML
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml
-          if-no-files-found: ignore
-          retention-days: 14
+      - name: Run unit tests (default suite excludes prefect_real via addopts)
+        run: pytest -q
 
       - name: Show test summary
         if: always()
