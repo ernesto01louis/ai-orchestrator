@@ -98,6 +98,8 @@ is in flight on `feat/phase2.6-new-ui-foundation`. See
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Local dev, conventions, where things go. |
 | [RUNBOOK.md](RUNBOOK.md) | Operational tasks (service control, restore, secret rotation). |
 | [SECURITY.md](SECURITY.md) | Threat model, secret handling, vuln reporting. |
+| [docs/PLUGINS.md](docs/PLUGINS.md) | Optional integrations (Blender, cloud image-gen, deepeval, SkyPilot). |
+| [docs/SOPS.md](docs/SOPS.md) | SOPS / age secret encryption setup + rotation. |
 
 ## Quickstart
 
