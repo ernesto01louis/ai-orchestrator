@@ -30,7 +30,6 @@ from pydantic import BaseModel
 
 import llm.ollama as _llm_ollama
 from agents.loader import load_agent, load_all_agents
-from agents.loader import reload_all as reload_agents
 from core.campaign import CampaignCreate
 from core.config import (
     DEPLOY_BASE,
@@ -1810,10 +1809,68 @@ def api_update_agent_prompt(role: str, prompt_type: str, body: dict):
 
 
 @router.post("/agents/reload")
-def api_reload_agents():
-    """Force-reload all agent configs from disk."""
-    agents = reload_agents()
-    return {"reloaded": list(agents.keys())}
+def api_reload_agents() -> dict[str, Any]:
+    """Hot-reload every agent config from ``agents/<role>/``.
+
+    Gated by the bearer-token middleware (Phase 1.7) like every other
+    authenticated endpoint. Clears the loader cache then iterates the
+    agents directory, surfacing both successful reloads and any
+    per-role failures so a corrupted ``agent.yaml`` doesn't silently
+    skip a role.
+
+    Response shape::
+
+        {
+          "reloaded": ["planner", "judge", "tool_dispatch", ...],
+          "failed":   [{"role": "foo", "error": "..."}],
+          "count":    {"reloaded": 3, "failed": 0}
+        }
+
+    Always HTTP 200 — partial failures are domain-level, not HTTP
+    errors. Returns 500 only when the agents directory itself is
+    unreadable.
+
+    This route's return shape gained ``failed`` + ``count`` keys
+    (additive). The MCP-tool surface in ``mcp_server.py`` is
+    unchanged, so ``MCP_CONTRACT_VERSION`` stays at ``1.0.0``.
+    """
+    from agents.loader import AGENTS_DIR, _cache
+
+    _cache.clear()
+
+    reloaded: list[str] = []
+    failed: list[dict[str, str]] = []
+
+    try:
+        entries = sorted(os.listdir(AGENTS_DIR))
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"cannot list agents directory: {exc}",
+        ) from exc
+
+    for entry in entries:
+        agent_dir = os.path.join(AGENTS_DIR, entry)
+        config_path = os.path.join(agent_dir, "agent.yaml")
+        if not (os.path.isdir(agent_dir) and os.path.exists(config_path)):
+            continue
+        try:
+            load_agent(entry, force_reload=True)
+            reloaded.append(entry)
+        except Exception as exc:  # noqa: BLE001 — surfaced in response
+            failed.append({"role": entry, "error": str(exc)})
+
+    import logging as _logging
+    _logging.getLogger("ai_orchestrator.agents").info(
+        "agents reloaded via REST: %d ok, %d failed",
+        len(reloaded), len(failed),
+    )
+
+    return {
+        "reloaded": reloaded,
+        "failed": failed,
+        "count": {"reloaded": len(reloaded), "failed": len(failed)},
+    }
 
 
 @router.get("/agents/{role}/variants")
