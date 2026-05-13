@@ -1,0 +1,21 @@
+# Optional plugin integrations.
+#
+# The orchestrator runs fine without any of these installed. Each
+# plugin is a domain-flavored convenience that some operators want
+# and others don't; carved out here so the base install stays lean
+# and platform-neutral.
+#
+# Pattern mirrors:
+#   requirements-cloud.txt       — Phase 2.5 SkyPilot cloud-burst
+#   requirements-eval.txt        — Repo-screening deepeval spike
+#
+# Install (operators who want the plugin):
+#   pip install -r requirements-plugins.txt
+#
+# Per-plugin install + activation notes live in docs/PLUGINS.md.
+
+# Blender MCP integration — drives Blender's Python API via an MCP
+# tool surface. Useful for consumer projects rendering 3D scenes
+# from LLM-generated geometry; never imported by the orchestrator
+# core. Audit Section B.7.
+blender-mcp==1.5.6

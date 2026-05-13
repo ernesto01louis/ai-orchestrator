@@ -10,10 +10,13 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
-# Secrets and local config
+# Secrets and local config.
+# .env stays gitignored (plaintext); .env.sops is the encrypted blob
+# (PR 3 of the audit-response hardening pass — see docs/SOPS.md).
 .env
 .env.*
 !.env.example
+!.env.sops
 config.json
 config.json.bak.*
 config.local.json

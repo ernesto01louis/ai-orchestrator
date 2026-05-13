@@ -89,6 +89,7 @@
     }
   ],
   "cloud_image_gen": {
+    "_comment": "Optional plugin — see docs/PLUGINS.md (audit B.6). Domain-flavored capability; safe to delete the whole block. The orchestrator does not require it. Replicate (FLUX) primary; Gemini fallback.",
     "enabled": false,
     "provider": "replicate",
     "_api_key_note": "Set REPLICATE_API_TOKEN in .env; leave api_key blank here.",
@@ -101,7 +102,9 @@
       "api_key": ""
     }
   },
-  "mcp_servers": {},
+  "mcp_servers": {
+    "_comment": "Optional plugin — see docs/PLUGINS.md. Per-target MCP server configs (e.g. blender-mcp). Empty by default; the orchestrator does not require any to be present."
+  },
   "prefect": {
     "api_url": "http://prefect.tailnet:4200/api",
     "execution_mode": "in_process",

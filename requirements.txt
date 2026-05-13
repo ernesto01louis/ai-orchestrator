@@ -5,7 +5,9 @@ arcp==0.2.1
 async-timeout==5.0.1
 attrs==26.1.0
 bcrypt==5.0.0
-blender-mcp==1.5.6
+# blender-mcp moved to requirements-plugins.txt (PR 3.B audit B.7).
+# The orchestrator does not import blender-mcp at runtime — see
+# docs/PLUGINS.md.
 cachetools==6.2.6
 certifi==2026.1.4
 cffi==2.0.0

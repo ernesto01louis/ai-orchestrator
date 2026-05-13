@@ -757,6 +757,11 @@ HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.
 - Multi-tenancy — solo project; not needed.
 - **Domain-specific code** (aero, CFD, RF, antennas, specific hardware) —
   consumer projects only.
+- **Domain-flavored capabilities baked into the base install**
+  (image gen, 3D rendering, hardware simulators). These go in
+  [docs/PLUGINS.md](docs/PLUGINS.md) behind ``enabled=false`` flags
+  + their own ``requirements-*.txt`` extras. Pattern: blender-mcp,
+  cloud_image_gen, deepeval G-Eval, SkyPilot cloud-burst.
 
 ## Conventions
 

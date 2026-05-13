@@ -62,9 +62,44 @@ run via `tools.load_tool_registry`).
 ## Rotate the Gotify token
 
 1. Open Gotify admin at `http://192.168.2.203:8090`, regenerate the application token.
-2. Edit `/opt/ai-orchestrator/.env`, replace `GOTIFY_TOKEN=`.
+2. Edit `/opt/ai-orchestrator/.env` (or `.env.sops` if Phase 0 SOPS
+   bootstrap is in place — see [docs/SOPS.md](docs/SOPS.md));
+   replace `GOTIFY_TOKEN=`.
 3. `systemctl restart ai-orchestrator`.
 4. `curl -sX POST http://127.0.0.1:8000/notifications/test` to confirm.
+
+## SOPS / age secrets at rest
+
+Plain `.env` is gitignored + chmod 600 but still leaks via host
+backups. Phase 0 SOPS bootstrap encrypts secrets at rest:
+`.env.sops` is the committed encrypted blob; `scripts/decrypt_env.sh`
+unpacks it to `/run/ai-orchestrator/.env` (tmpfs) on every service
+start.
+
+**First-time setup:**
+
+```bash
+sudo bash scripts/install_sops.sh
+# Paste the printed age public key into .sops.yaml.
+sops --encrypt .env > .env.sops
+
+# Wire the systemd unit:
+sudo systemctl edit ai-orchestrator.service
+# Add inside [Service]:
+#   RuntimeDirectory=ai-orchestrator
+#   ExecStartPre=/opt/ai-orchestrator/scripts/decrypt_env.sh
+#   EnvironmentFile=-/run/ai-orchestrator/.env
+
+sudo systemctl daemon-reload
+sudo systemctl restart ai-orchestrator
+git add .env.sops .sops.yaml && git commit
+```
+
+Edits, rotation, recovery, and multi-operator setup: see
+[docs/SOPS.md](docs/SOPS.md).
+
+**Bypass for dev:** Plain `.env` (gitignored) still works — the
+systemd hook is a no-op when `.env.sops` is absent.
 
 ## Restore from backup
 
