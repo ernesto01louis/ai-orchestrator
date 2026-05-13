@@ -68,11 +68,28 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       pre-loaded data as parameters instead of calling load_*).
 - [x] Backup/restore documentation: `RESTORE.md` is the authoritative
       procedure (Scenarios A + B + quarterly drill); `scripts/backup.sh`
-      is the rsync-with-link-dest snapshot runner. Open sub-items inside
-      RESTORE.md: activate the nightly cron, set up an offsite copy,
-      run the first quarterly drill. (RUNBOOK.md still has the day-to-day
-      ops; RESTORE.md is the disaster-recovery doc.)
-- [ ] Push the repo to GitHub, enable branch protection on main.
+      is the rsync-with-link-dest snapshot runner.
+- [x] **Off-site backup live** — Postgres pg_dump runs daily on LXC 202
+      and rsyncs to TrueNAS `~/pgbackup/` over a dedicated `ed25519`
+      key (per `RUNBOOK.md` "Backup independence"). Verified 2026-05-11:
+      5 daily dumps present at both source + destination.
+- [ ] **First quarterly restore drill** — requires operator approval
+      to `createdb`/`dropdb` on LXC 202. RESTORE.md procedure ready;
+      automation hook deferred to operator's next maintenance window.
+- [ ] **Branch protection on `main`** — operator-only GitHub UI flip
+      (Settings → Branches → Add rule). Sub-90-second action; deferred
+      to operator.
+- [x] **SOPS / age secrets at rest** — landed in PR 3 of the
+      hardening pass. `.env` → `.env.sops` encrypted at rest;
+      systemd `ExecStartPre` decrypts to `/run/ai-orchestrator/.env`
+      (memfs). See `docs/SOPS.md`.
+
+#### Parked indefinitely
+- Tailscale on orchestrator LXC 200. The original Phase 1.3 cleanup
+  note flagged this, but the orchestrator runs cleanly on the LAN
+  and the Prefect / Postgres / Redis / Tempo paths all use LAN IPs
+  with no operator pain. Reopen if and only if the orchestrator
+  needs to be reachable from outside the homelab.
 
 ---
 
@@ -123,8 +140,10 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       `RunRecord.llm_calls`. Scope β (citation-grade fidelity for `call_id`,
       `role`, `target.host`, `response_text`, `started_at`) tracked at
       `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`.
-- [ ] *Deferred to Phase 2*: self-hosted Sigstore (Fulcio + Rekor) —
-      DSSE envelope abstracts trust root, older bundles stay verifiable
+- [ ] *Deferred to Phase 4+ backlog*: self-hosted Sigstore (Fulcio +
+      Rekor) for transparency-log inclusion. The DSSE envelope already
+      abstracts the trust root, so older bundles stay verifiable
+      regardless of when Sigstore lands. See the Phase 4 section.
 
 ### 1.3 Prefect 3.x integration — DONE (v0.1.3-phase1.3, PR #4 + #5)
 - [x] Prefect 3.6.29 server on dedicated LXC 201 (`prefect-server`,
@@ -162,9 +181,10 @@ Result: app.py 7,523 → 303 lines (-7,220, -96%).
       `evidence/builder.py:_record_to_llm_call` placeholders dropped.
       Followup doc at `docs/superpowers/followups/phase-j-beta-llm-call-fidelity.md`
       flipped to "DONE".
-- [ ] *Deferred (operational)*: install Tailscale on orchestrator LXC 200
-      so `prefect.api_url` can move from LAN IP to tailnet — script staged at
-      `root@192.168.2.13:/root/install_ts_lxc200.sh`
+- [~] *Parked indefinitely*: Tailscale on orchestrator LXC 200 (script
+      staged at `root@192.168.2.13:/root/install_ts_lxc200.sh`). LAN
+      paths to Prefect / Postgres / Redis / Tempo work cleanly; no
+      operator pain. See Phase 0 "Parked indefinitely" block.
 
 ### 1.4 DVC on TrueNAS — DONE (v0.1.4-phase1.4, shipped 2026-05-06)
 - [x] `pip install dvc[ssh]` — pinned `dvc[ssh]>=3.67,<4` in `requirements.txt`
@@ -300,24 +320,30 @@ Ships dormant — `postgres.enabled=false` default. Operator action: stand up ne
 
 Ships **dormant** (`sky.enabled=false` default). Operator action: configure provider creds (e.g. `RUNPOD_API_KEY`), run `sky check`, flip `sky.enabled=true`, restart orchestrator.
 
-### 2.5.1 vLLM serving inside SkyPilot bursts — DORMANT, depends on 2.5 activation
-- [ ] Swap `sky/llm-burst.yaml` from Ollama to vLLM's OpenAI-compatible container — Ollama already exposes `/v1/chat/completions` so the client-side adapter is near-zero
-- [ ] Add a tiny adapter shim in `llm/` (likely 1 file, < 100 lines) for the OpenAI-shape endpoints when the burst handle is the active LLM target
-- [ ] Leave the local LXC stack on Ollama — single-stream serial Prefect calls don't benefit from vLLM; GGUF support in vLLM is officially "experimental" with an active deprecation RFC (vllm-project/vllm#39583)
+### 2.5.1 vLLM serving inside SkyPilot bursts
+Moved to Phase 4+ backlog (see below). Activates the day
+`sky.enabled=true` AND a paid-provider key is configured; until then,
+no code, no LXC.
 
-Rationale: vLLM beats Ollama ~2-5× on $/token for batched workloads on
-rented GPUs (8+ concurrent users, e.g. an eval harness blasting 1000
-prompts at a RunPod A100). For single-stream serial planner→generator→
-judge calls on the local LXC, Ollama wins or ties.
-
-Trigger: activates the day `sky.enabled=true` AND a paid-provider key
-(e.g. `RUNPOD_API_KEY`) is configured. Until then, this entry sits
-dormant — no code, no LXC.
-
-### 2.6 New UI
-- [ ] Framework decision (React/Vue/Svelte)
-- [ ] Thin client, REST + WebSocket only
-- [ ] Pages: Runs, Campaigns, Memory Search, Gates, Models, Targets, Vault, Config, Live Logs
+### 2.6 New UI — IN FLIGHT
+- [x] Framework decision: **React 19 + Vite + TypeScript + Tailwind v4**
+      (decided 2026-05-08, shipped in PR (a) below).
+- [x] **PR (a) Foundation** on `feat/phase2.6-new-ui-foundation`
+      (PR #22): Vite scaffold, design tokens (oklch), `useTheme` hook
+      with `default | personal` modes, shared atoms (Card, Badge,
+      Button, LiveDot, Sparkline, PhaseBadge, ScoreBar, BudgetBar,
+      ConfidenceBar, KV, Terminal), sidebar + topbar shell, REST +
+      WebSocket seams, 7 routes wired (3 placeholders + 4 stub pages).
+- [ ] **PR (b) Pages**: pixel-fidelity port of Dashboard / Runs (list +
+      detail) / HITL Console from the Claude-Design prototype.
+- [ ] **PR (c) Serving + docs**: FastAPI route at `/console` serving
+      `ui/console/dist/`; new `/metrics_console` endpoint shaping
+      dashboard data; CLAUDE / ROADMAP / RUNBOOK updates; optional
+      CI build step.
+- [ ] **Personal theme stub** at `ui/console/src/themes/personal.ts`
+      ships empty — operator fills in the anime-inspired override
+      palette + animations in a follow-up. Theme switching already
+      wired (`__setTheme("personal")` in the browser console).
 
 ---
 
@@ -353,6 +379,53 @@ dormant — no code, no LXC.
 
 Items here have a roadmap entry but no concrete plan and no schedule.
 They land in their own phase only if a downstream need surfaces.
+
+### 4.x Self-hosted Sigstore (Fulcio + Rekor) for evidence-bundle transparency
+
+Phase 1.2 evidence bundles are DSSE-signed today with a host-local
+Ed25519 key. Adding a transparency log proves *when* a bundle was
+signed and lets external verifiers audit-trail backwards in time
+without trusting the orchestrator host.
+
+- [ ] Stand up Fulcio (issues short-lived signing certs from an OIDC
+      identity) + Rekor (the append-only transparency log) on a
+      dedicated LXC. The reference setup at
+      https://github.com/sigstore/sigstore-conformance documents the
+      bring-up.
+- [ ] Update `evidence/signing.py` to optionally include a Rekor
+      inclusion-proof URL in the DSSE envelope's `payload` map.
+- [ ] Keep the local Ed25519 path as the default; Sigstore is opt-in
+      via a new `evidence.sigstore.enabled` config flag.
+
+Risk: low-priority — the DSSE envelope already abstracts the trust
+root, so older bundles stay verifiable regardless of when Sigstore
+lands. **Backlog entry only — no spike planned.**
+
+Reference: https://github.com/sigstore/cosign
+
+### 4.x vLLM serving inside SkyPilot bursts (depends on 2.5 activation)
+
+Phase 2.5 SkyPilot is dormant. When it activates (operator drops
+RunPod / Vast.ai creds + flips `sky.enabled=true`), swapping the
+LLM in `sky/llm-burst.yaml` from Ollama to vLLM's OpenAI-compatible
+container is a near-zero-effort win for batched workloads.
+
+- [ ] Swap `sky/llm-burst.yaml` to a vLLM container (vLLM already
+      exposes `/v1/chat/completions`; the client-side adapter is a
+      one-line URL change).
+- [ ] Leave the local LXC stack on Ollama — single-stream serial
+      Prefect calls don't benefit from vLLM, and GGUF support in vLLM
+      is officially "experimental" with an active deprecation RFC
+      (vllm-project/vllm#39583).
+
+Rationale: vLLM beats Ollama ~2–5× on $/token for batched workloads
+on rented GPUs (8+ concurrent users, e.g. an eval harness blasting
+1000 prompts at an A100). For single-stream serial planner →
+generator → judge calls on the local LXC, Ollama wins or ties.
+
+Trigger: activates the day `sky.enabled=true` AND a paid-provider
+key is configured. Until then, this entry sits dormant — no code,
+no LXC.
 
 ### 4.x Explore prollytree-backed memory branching for HITL co_pilot mode
 When the operator rejects a planner output in HITL `co_pilot` mode,

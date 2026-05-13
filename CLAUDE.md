@@ -537,6 +537,62 @@ description from a vision model when available.
 - `tests/examples/test_example_consumer_smoke.py` enforces the
   consumer-internal-import guard via source-text scan.
 
+**Operator notes — caveats + policies:**
+
+*HITL config precedence.* Three sources for `hitl_mode`, evaluated in
+this order:
+
+1. **`CampaignTemplate.hitl_mode`** — per-campaign, set at campaign
+   creation. Highest precedence.
+2. **`hitl.default_mode`** in `config.example.json` / live `config.json`
+   — system-wide fallback for runs not bound to a campaign (one-shot
+   `/orchestrate` requests). Default `"full_auto"`.
+3. **`"full_auto"`** — hardcoded final fallback used when both above
+   are absent or invalid (see `core.hitl.get_run_hitl_mode`).
+
+`RUN_STATUS[run_id]["hitl_mode"]` is the *read-back* of the chosen
+value for the UI / log — NOT a source-of-truth. Don't write back to
+it expecting the orchestrator to re-route on the next checkpoint.
+
+*Degraded evidence on Prefect server-down fallback.* When the Prefect
+server at LXC 201 is unreachable, `prefect_io/__init__.py` falls back
+to a daemon-thread spawn that calls `run_orchestration.fn(...)`
+directly. This bypass keeps runs executing, but it **skips the
+`state_hooks.on_task_completion` hook** that normally populates
+`LLM_CALL_LOG` with citation-grade `LlmCall` records. Evidence
+bundles emitted from fallback runs have empty `runs[].llm_calls`
+arrays — they pass DSSE + Merkle verification but lose the
+per-call telemetry. The fallback is for emergency continuity, not
+publishable-grade output. (Phase 2 tech-debt PR adds a stub
+`LlmCallRecord` synth on this path so bundles are non-empty; the
+records are flagged `call_id="fallback-<uuid>"`, `model_digest="unavailable"`
+to make the degradation visible to verifiers.)
+
+*OTel beta-pin policy.* The OpenTelemetry SDK is pinned at
+`0.62b1` / `1.41.1` — a coordinated **beta-channel** group across
+four packages (`opentelemetry-api`, `opentelemetry-sdk`,
+`opentelemetry-proto`, `opentelemetry-exporter-otlp-proto-grpc`)
+plus the `opentelemetry-instrumentation-{fastapi,requests,asgi}`
+group at the matching beta. When bumping:
+
+1. **Bump all four core packages together**, plus the three
+   instrumentation packages. Mixing minors silently breaks the
+   trace-context propagation contract.
+2. **Verify against a known-good Tempo container** (we pin Tempo
+   2.6.1 for the same reason — `13.x` had the reset-admin-password
+   regression). Spin up `grafana/tempo:2.6.1` locally, point the
+   orchestrator at it, generate a trace with `curl /health` + a real
+   `/orchestrate` run, confirm both arrive in Tempo with
+   `service.name=ai-orchestrator`.
+3. **Watch the FastAPI auto-instrumentation specifically** — it has
+   the highest churn rate of the four. A bump that breaks it shows
+   up as missing HTTP-route spans (LLM spans + manual spans keep
+   working, so silence in `/api/search?tags=service.name=...` is
+   the failure signature).
+
+Dependabot config (`.github/dependabot.yml`) groups OTel updates so
+patch + minor land together; major bumps remain manual.
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase task list.
