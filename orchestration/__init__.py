@@ -25,7 +25,7 @@ from prefect_io.state_hooks import (
     on_running, on_completion, on_failure, on_cancelled,
 )
 
-from agents.loader import load_agent
+from agents.loader import load_agent, load_schema as _load_agent_schema
 from core.config import (
     CONFIG, OLLAMA_MAIN_URL, OLLAMA_JUDGE_URL, OLLAMA_PLANNER_URL,
     OLLAMA_MAIN, OLLAMA_JUDGE, OLLAMA_MAIN_CHAT, OLLAMA_JUDGE_CHAT,
@@ -109,49 +109,17 @@ SAFE_FILENAME = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$")
 
 
 # ── Agent schemas (loaded at import time) ─────────
-# Originally lived in app.py via _load_agent_schema().
-def _load_agent_schema(role: str, fallback: dict) -> dict:
-    """Load schema.json from agents/<role>/, falling back to the embedded default."""
-    try:
-        cfg = load_agent(role)
-        schema = getattr(cfg, "schema", None)
-        return schema if schema else fallback
-    except Exception:  # noqa: BLE001
-        return fallback
-
-
-PLAN_SCHEMA = _load_agent_schema("planner", {
-    "type": "object",
-    "properties": {
-        "language": {"type": "string"},
-        "entrypoint": {"type": "string"},
-        "deps": {"type": "array", "items": {"type": "string"}},
-        "approach": {"type": "string"},
-        "files": {"type": "array", "items": {"type": "object"}},
-        # Phase 3.2 SmartPause — planner self-confidence in [0, 1].
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-    },
-    "required": ["language", "entrypoint", "approach"],
-})
-
-JUDGE_SCHEMA = _load_agent_schema("judge", {
-    "type": "object",
-    "properties": {
-        "score": {"type": "integer"},
-        "reasoning": {"type": "string"},
-        "improvements": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["score", "reasoning"],
-})
-
-TOOL_DISPATCH_SCHEMA = _load_agent_schema("tool_dispatch", {
-    "type": "object",
-    "properties": {
-        "tools_to_run": {"type": "array", "items": {"type": "object"}},
-        "reasoning": {"type": "string"},
-    },
-    "required": ["tools_to_run"],
-})
+# Single-sourced from agents/<role>/schema.json via agents.loader.load_schema
+# (imported at the top of the module). Missing or invalid schema →
+# RuntimeError at import time (fail-fast). The previous inline-fallback
+# pattern silently activated a stale schema dict whenever the on-disk
+# file failed to load, which broke structured-output validation in
+# confusing ways once the canonical schemas drifted (planner gained
+# ``project_type`` / ``execution_mode`` / ``port`` / ``steps``; judge
+# swapped scalar ``score`` for multi-dimensional scoring; etc.).
+PLAN_SCHEMA = _load_agent_schema("planner")
+JUDGE_SCHEMA = _load_agent_schema("judge")
+TOOL_DISPATCH_SCHEMA = _load_agent_schema("tool_dispatch")
 
 # Replace bare _url_cache references with module-qualified ones at runtime.
 # orchestration.refresh_models() calls _llm_ollama._refresh_url_cache() and reads _llm_ollama._url_cache.

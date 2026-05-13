@@ -165,15 +165,77 @@ def _spawn_daemon_thread(
 
 
 def _spawn_daemon_thread_fallback(
-    flow_callable: Any, args: tuple[Any, ...]
+    flow_callable: Any,
+    args: tuple[Any, ...],
+    *,
+    run_id: str | None = None,
 ) -> None:
     """Server-down fallback: invoke `.fn` (raw Python) in a daemon thread.
 
     No Prefect tracking, no hooks, no retries. Inline `_update_run_status`
     calls in run_orchestration / run_campaign keep the WebSocket UI alive.
+
+    Phase 2 hardening: when ``run_id`` is known (orchestration fallback),
+    a single stub ``LlmCallRecord`` is appended to ``LLM_CALL_LOG`` after
+    the flow returns so the evidence bundle for the run is non-empty.
+    The stub is flagged ``call_id="fallback-<uuid>"`` and
+    ``model_digest="unavailable"`` so verifiers can recognise the
+    degradation. See CLAUDE.md "Degraded evidence on Prefect server-down
+    fallback" for the contract. Campaign-level fallback (no per-run id
+    at spawn time) skips the synth — campaign re-runs cover the gap.
     """
     raw_fn = getattr(flow_callable, "fn", flow_callable)
-    threading.Thread(target=raw_fn, args=args, daemon=True).start()
+
+    def _wrapped() -> None:
+        try:
+            raw_fn(*args)
+        finally:
+            if run_id:
+                _append_fallback_stub_llm_call(run_id)
+
+    threading.Thread(target=_wrapped, daemon=True).start()
+
+
+def _append_fallback_stub_llm_call(run_id: str) -> None:
+    """Push one stub LlmCallRecord onto LLM_CALL_LOG.
+
+    The orchestration loop ran without Prefect's on_task_completion
+    state hook firing (server-down fallback), so the evidence bundle
+    would otherwise have an empty ``runs[].llm_calls`` array. The stub
+    documents the degradation explicitly. Safe to call after the
+    raw_fn invocation completes (success or exception); failures here
+    must never propagate.
+    """
+    try:
+        import uuid as _uuid  # noqa: PLC0415
+        from datetime import datetime as _datetime, timezone as _timezone  # noqa: PLC0415
+
+        from core.llm_call_log import LLM_CALL_LOG, LlmCallRecord  # noqa: PLC0415
+
+        record = LlmCallRecord(
+            run_id=run_id,
+            model="unknown (fallback)",
+            rendered_messages=[],
+            sampling={},
+            response_tokens=0,
+            duration_ms=0,
+            call_id=f"fallback-{_uuid.uuid4()}",
+            agent_role="fallback",
+            server_url="prefect-server-down",
+            model_digest="unavailable",
+            model_size_bytes=0,
+            response_text=(
+                "(fallback: Prefect server was unreachable; no per-LLM-call "
+                "telemetry was captured during this run. The orchestration "
+                "loop still executed via the .fn raw-Python path. See "
+                "CLAUDE.md 'Degraded evidence on Prefect server-down "
+                "fallback' for the contract.)"
+            ),
+            started_at=_datetime.now(_timezone.utc),
+        )
+        LLM_CALL_LOG.append(record)
+    except Exception:  # noqa: BLE001 — never let stub-synth break a run
+        logger.warning("fallback LlmCallRecord stub-synth failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +256,9 @@ def submit_orchestration(req: Any, run_id: str) -> dict[str, str | None]:
         logger.warning("Prefect server unreachable; using daemon-thread fallback")
         _notify_prefect_down()
         from orchestration import run_orchestration
-        _spawn_daemon_thread_fallback(run_orchestration, (req, run_id))
+        _spawn_daemon_thread_fallback(
+            run_orchestration, (req, run_id), run_id=run_id,
+        )
         return {"run_id": run_id, "flow_run_id": None}
 
     if mode == "deployment":

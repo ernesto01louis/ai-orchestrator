@@ -28,6 +28,7 @@ import logging
 import os
 import secrets
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -291,34 +292,101 @@ def start_ws_broadcast_subscriber() -> None:
 
 
 def _ws_subscriber_loop() -> None:
-    """Long-running pub/sub consumer. Logs and exits on fatal Redis error.
+    """Long-running pub/sub consumer. Survives transient Redis errors
+    via in-place re-subscribe with capped exponential backoff.
 
-    Daemon thread — Python lets it terminate on process shutdown.
+    Phase 2 hardening replaced the pre-Phase-2 "return on connection
+    death" behaviour with a supervisor inside the loop. Three Prom
+    instruments make the subscriber observable from Grafana:
+
+      * ``orchestrator_redis_subscriber_heartbeat_total{outcome="tick"}``
+        — bumped on every poll cycle (~1Hz under idle traffic).
+      * ``orchestrator_redis_subscriber_heartbeat_total{outcome="error"}``
+        — bumped on every exception in ``get_message``.
+      * ``orchestrator_redis_subscriber_restarts_total`` — bumped on
+        each successful re-subscribe after a connection-death event.
+
+    Alert on ``rate(heartbeat_total{outcome="tick"}[1m]) == 0`` for the
+    "is this thread alive?" signal even when the thread object reports
+    ``is_alive()``. Daemon thread — Python lets it terminate on
+    process shutdown.
     """
     try:
         from core import redis_client  # noqa: PLC0415
+        from core.metrics import (  # noqa: PLC0415
+            observe_redis_subscriber_error,
+            observe_redis_subscriber_restart,
+            observe_redis_subscriber_tick,
+        )
     except ImportError:
         return
-    try:
+
+    def _try_subscribe() -> Any:
         client = redis_client.get_client()
-        # redis-py's PubSub factory is untyped — its constructor takes
-        # dynamic kwargs that mypy can't see through, so we suppress.
-        pubsub = client.pubsub()  # type: ignore[no-untyped-call]
-        pubsub.subscribe(_WS_BROADCAST_CHANNEL)
-    except Exception as exc:
-        _logger.warning("redis_ws_subscribe_failed error=%s", exc)
-        return
-    # Poll-based loop instead of ``pubsub.listen()`` — the connection
-    # inherits the client's ``socket_timeout`` (5s by default), and a
-    # blocking listen() raises on every timeout window. ``get_message``
-    # with a bounded timeout returns ``None`` cleanly when there's
-    # nothing to read, letting the loop survive idle pub/sub forever.
+        ps = client.pubsub()  # type: ignore[no-untyped-call]
+        ps.subscribe(_WS_BROADCAST_CHANNEL)
+        return ps
+
+    pubsub = None
+    backoff_seconds = 1.0
+    max_backoff_seconds = 30.0
+    # Give up if Redis stays unreachable past this many consecutive
+    # poll/subscribe failures — the supervisor should not spin a
+    # daemon thread forever on a permanently-dead Redis. With the
+    # capped backoff above, MAX_CONSECUTIVE_FAILURES=10 covers ~5
+    # minutes of degraded service before the subscriber exits and
+    # lets ``start_ws_broadcast_subscriber`` re-spawn on the next
+    # operator call.
+    MAX_CONSECUTIVE_FAILURES = 10
+    consecutive_failures = 0
+
     while True:
+        if pubsub is None:
+            try:
+                pubsub = _try_subscribe()
+                # Successful re-subscribe after at least one failure
+                # counts as a restart event. Note: we deliberately do
+                # NOT reset ``consecutive_failures`` here — only a
+                # successful poll counts as "things are working again".
+                # Otherwise a subscribe-OK-then-poll-fail cycle (e.g.
+                # the test helper that scripts a sentinel exception)
+                # would spin forever.
+                if backoff_seconds > 1.0:
+                    observe_redis_subscriber_restart()
+                backoff_seconds = 1.0
+            except Exception as exc:  # noqa: BLE001 — keep loop alive
+                observe_redis_subscriber_error()
+                _logger.warning(
+                    "redis_ws_subscribe_failed error=%s sleep=%.1fs",
+                    exc, backoff_seconds,
+                )
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    _logger.warning(
+                        "redis_ws_subscriber giving up after %d consecutive failures",
+                        consecutive_failures,
+                    )
+                    return
+                time.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
+                continue
+
         try:
             raw = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-        except Exception as exc:  # pragma: no cover — connection death
+        except Exception as exc:  # noqa: BLE001 — connection death recoverable
+            observe_redis_subscriber_error()
             _logger.warning("redis_ws_subscriber_died error=%s", exc)
-            return
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                _logger.warning(
+                    "redis_ws_subscriber giving up after %d consecutive failures",
+                    consecutive_failures,
+                )
+                return
+            pubsub = None  # force re-subscribe on next iteration
+            continue
+        observe_redis_subscriber_tick()
+        consecutive_failures = 0  # any successful poll resets the counter
         if raw is None:
             continue
         if raw.get("type") != "message":

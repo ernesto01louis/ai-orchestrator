@@ -148,6 +148,48 @@ def observe_redis_run_status_write(operation: str, *, success: bool) -> None:
     ).inc()
 
 
+# Phase 2 hardening: Redis pub/sub subscriber heartbeat + watchdog.
+#
+# The WS-broadcast subscriber polls ``pubsub.get_message(timeout=1.0)``
+# in a daemon thread. Pre-Phase-2 the thread silently exited on
+# connection death — the ``_ws_subscriber_died`` log line was the only
+# signal, easy to miss in journalctl. These counters give Grafana a
+# reliable "is the subscriber alive?" probe.
+#
+# ``outcome`` for HEARTBEAT_TOTAL is one of {"tick", "error"}; the
+# tick rate is roughly 1Hz under idle traffic (matches the get_message
+# timeout). Alert when ticks fall to zero for >30s.
+#
+# RESTARTS_TOTAL increments every time the supervisor re-subscribes
+# after a connection-death exception in the get_message loop. A
+# non-zero rate flags persistent Redis issues even when the
+# subscriber is technically "alive".
+
+REDIS_SUBSCRIBER_HEARTBEAT_TOTAL = Counter(
+    "orchestrator_redis_subscriber_heartbeat_total",
+    "Redis WS-broadcast subscriber polls by outcome.",
+    ["outcome"],  # tick | error
+)
+
+REDIS_SUBSCRIBER_RESTARTS_TOTAL = Counter(
+    "orchestrator_redis_subscriber_restarts_total",
+    "Times the Redis WS-broadcast subscriber re-subscribed after a "
+    "connection-death exception in the poll loop.",
+)
+
+
+def observe_redis_subscriber_tick() -> None:
+    REDIS_SUBSCRIBER_HEARTBEAT_TOTAL.labels(outcome="tick").inc()
+
+
+def observe_redis_subscriber_error() -> None:
+    REDIS_SUBSCRIBER_HEARTBEAT_TOTAL.labels(outcome="error").inc()
+
+
+def observe_redis_subscriber_restart() -> None:
+    REDIS_SUBSCRIBER_RESTARTS_TOTAL.inc()
+
+
 # ---------------------------------------------------------------------------
 # Phase 2.4 budget metrics
 # ---------------------------------------------------------------------------

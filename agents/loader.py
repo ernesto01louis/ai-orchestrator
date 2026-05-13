@@ -15,7 +15,6 @@ import re
 
 import yaml
 
-
 AGENTS_DIR = os.path.join(os.path.dirname(__file__))
 
 # Cache: role -> loaded AgentConfig
@@ -149,6 +148,37 @@ def load_agent(role, force_reload=False):
     agent = AgentConfig(role, agent_dir)
     _cache[role] = agent
     return agent
+
+
+def load_schema(role):
+    """Return the JSON schema dict for ``role`` from ``agents/<role>/schema.json``.
+
+    Single source of truth for agent structured-output schemas. Replaces
+    the inline-fallback pattern that previously lived in both
+    ``app.py`` and ``orchestration/__init__.py`` — those copies drifted
+    from the canonical files on disk (planner gained ``project_type``,
+    judge swapped scalar ``score`` for multi-dimensional scoring, etc.),
+    and silently activating the stale fallback when ``agents/`` was
+    corrupted broke structured-output validation in confusing ways.
+
+    Raises ``RuntimeError`` when the schema is missing or invalid. The
+    agents/ directory is checked into git; a missing schema means a
+    deployment-level corruption and is worth failing fast on.
+    """
+    agent_dir = os.path.join(AGENTS_DIR, role)
+    schema_path = os.path.join(agent_dir, "schema.json")
+    if not os.path.exists(schema_path):
+        raise RuntimeError(
+            f"agents/{role}/schema.json missing — single-source agent "
+            f"schemas require an on-disk schema for each structured role."
+        )
+    try:
+        with open(schema_path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"agents/{role}/schema.json invalid: {exc}"
+        ) from exc
 
 
 def load_all_agents(force_reload=False):

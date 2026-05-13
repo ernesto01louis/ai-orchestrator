@@ -25,7 +25,7 @@ jobs:
           # here so the mock-based unit tests in tests/test_eval_scoring.py
           # can patch `deepeval.*` symbols.
           pip install -r requirements-eval.txt
-          pip install pytest pytest-asyncio pytest-mock httpx ruff mypy types-requests types-PyYAML
+          pip install pytest pytest-asyncio pytest-mock pytest-cov httpx ruff mypy types-requests types-PyYAML
           # Phase 3.4 — example consumer smoke tests load the SDK to
           # validate the public contract from the consumer's side. The
           # orchestrator never imports it at runtime; this is a

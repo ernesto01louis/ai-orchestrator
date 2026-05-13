@@ -67,7 +67,6 @@ from core.runtime import (
 from core.auth import BearerTokenAuthMiddleware, load_token_from_env
 import core.metrics  # noqa: F401 — registers Prometheus instruments at import time
 
-from agents.loader import load_agent, load_all_agents, reload_all as reload_agents, list_roles as list_agent_roles
 from dream import run_dream, DREAM_LOG, _load_json as dream_load_json
 from gates import (
     init_gates, check_gate, record_lesson, record_runtime_failure,
@@ -309,56 +308,11 @@ _run_counter_since_dream = 0
 SAFE_FILENAME = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$")
 
 
-# ------------------------------------------------
-# JSON SCHEMAS FOR STRUCTURED OUTPUT
-# ------------------------------------------------
-
-# Schemas loaded from agents/ configs — fall back to inline defaults if loader fails
-def _load_agent_schema(role, fallback):
-    try:
-        agent = load_agent(role)
-        if agent.schema:
-            return agent.schema
-    except Exception:
-        pass
-    return fallback
-
-PLAN_SCHEMA = _load_agent_schema("planner", {
-    "type": "object",
-    "properties": {
-        "language": {"type": "string"}, "entrypoint": {"type": "string"},
-        "project_type": {"type": "string"}, "execution_mode": {"type": "string"},
-        "port": {"type": "integer"},
-        "files": {"type": "object", "additionalProperties": {"type": "string"}},
-        "dependencies": {"type": "array", "items": {"type": "string"}},
-        "steps": {"type": "array", "items": {"type": "string"}}
-    },
-    "required": ["language", "entrypoint", "project_type", "execution_mode", "files", "dependencies", "steps"]
-})
-
-JUDGE_SCHEMA = _load_agent_schema("judge", {
-    "type": "object",
-    "properties": {
-        "correctness": {"type": "number"}, "robustness": {"type": "number"},
-        "security": {"type": "number"}, "performance": {"type": "number"},
-        "structure": {"type": "number"}, "overall": {"type": "number"},
-        "improvements": {"type": "array", "items": {"type": "string"}}
-    },
-    "required": ["correctness", "robustness", "security", "performance", "overall", "improvements"]
-})
-
-TOOL_DISPATCH_SCHEMA = _load_agent_schema("tool_dispatch", {
-    "type": "object",
-    "properties": {
-        "tools": {"type": "array", "items": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}, "args": {"type": "object", "additionalProperties": {"type": "string"}}},
-            "required": ["name"]
-        }}
-    },
-    "required": ["tools"]
-})
-
+# Agent JSON schemas (PLAN_SCHEMA / JUDGE_SCHEMA / TOOL_DISPATCH_SCHEMA)
+# now live in ``orchestration.__init__`` — loaded once via
+# ``agents.loader.load_schema`` at import time. Nothing in or outside this
+# file imports them from ``app``, so they're removed entirely rather than
+# re-exported. See ``agents/<role>/schema.json`` for the canonical contracts.
 
 
 # ------------------------------------------------
