@@ -260,3 +260,76 @@ def test_runs_shape_round_trips_to_json(client):
     # If json.dumps would have raised in the handler it would have 500'd —
     # belt-and-suspenders: re-encode here.
     json.dumps(r.json())
+
+
+# ── SPA static mount ────────────────────────────────────────────────────
+
+
+def test_console_spa_root_serves_index_html(client):
+    """The /console mount must serve the SPA index when the build exists."""
+    from pathlib import Path
+    dist = Path("/opt/ai-orchestrator/ui/console/dist")
+    if not dist.is_dir():
+        pytest.skip("SPA build missing — run `cd ui/console && npm run build`")
+
+    r = client.get("/console/")
+    assert r.status_code == 200
+    body = r.text
+    assert "<div id=\"root\"" in body or "id=\"root\"" in body
+
+
+def test_console_spa_deep_link_falls_back_to_index(client):
+    """react-router client-side routes must serve index.html, not 404."""
+    from pathlib import Path
+    if not Path("/opt/ai-orchestrator/ui/console/dist").is_dir():
+        pytest.skip("SPA build missing")
+
+    for deep in ("/console/dashboard", "/console/runs/abc",
+                 "/console/hitl", "/console/campaigns"):
+        r = client.get(deep)
+        assert r.status_code == 200, f"{deep} → {r.status_code}"
+        assert "id=\"root\"" in r.text
+
+
+def test_console_prefix_bypasses_bearer_auth():
+    """Verify the auth middleware lets /console/* through even with a token set.
+
+    Surgical: instantiates the middleware directly rather than reloading
+    the app, so this test is isolated from session-wide module state.
+    """
+    import asyncio
+    from core.auth import BearerTokenAuthMiddleware
+
+    sent: list[dict] = []
+
+    async def inner_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(msg):
+        sent.append(msg)
+
+    mw = BearerTokenAuthMiddleware(inner_app, token="secret-xyz")
+
+    async def run_scope(path: str):
+        sent.clear()
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "headers": [],
+        }
+        await mw(scope, receive, send)
+        return next((m["status"] for m in sent if m["type"] == "http.response.start"), None)
+
+    # /console paths bypass
+    assert asyncio.run(run_scope("/console")) == 200
+    assert asyncio.run(run_scope("/console/")) == 200
+    assert asyncio.run(run_scope("/console/dashboard")) == 200
+    assert asyncio.run(run_scope("/console/assets/index-abc.js")) == 200
+
+    # Other protected paths still require token
+    assert asyncio.run(run_scope("/runs")) == 401

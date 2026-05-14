@@ -365,12 +365,36 @@ app.include_router(_api_router)
 # api/routes/admin.py:382 keeps working. The mount is guarded by an
 # existence check on the build output so fresh checkouts that haven't
 # run ``cd ui/console && npm run build`` yet won't crash on import.
+#
+# We use an explicit catch-all rather than ``StaticFiles(html=True)``
+# alone because react-router's BrowserRouter does client-side routing —
+# a request for /console/runs/abc123 must serve index.html so the SPA
+# can take over, not 404. The catch-all handler probes for a real file
+# first (so /console/assets/index-*.js still serves the JS bundle),
+# then falls back to index.html.
 from pathlib import Path as _Path  # noqa: E402
+
+from fastapi.responses import FileResponse  # noqa: E402
 
 _CONSOLE_DIST = _Path(__file__).parent / "ui" / "console" / "dist"
 if _CONSOLE_DIST.is_dir():
-    app.mount(
-        "/console",
-        StaticFiles(directory=str(_CONSOLE_DIST), html=True),
-        name="console",
-    )
+    _CONSOLE_INDEX = _CONSOLE_DIST / "index.html"
+
+    @app.get("/console", include_in_schema=False)
+    @app.get("/console/", include_in_schema=False)
+    async def _console_root():
+        return FileResponse(_CONSOLE_INDEX)
+
+    @app.get("/console/{path:path}", include_in_schema=False)
+    async def _console_spa(path: str):
+        # Disallow path-traversal — Path resolution would escape the
+        # dist directory if `path` is `../foo`.
+        candidate = (_CONSOLE_DIST / path).resolve()
+        try:
+            candidate.relative_to(_CONSOLE_DIST.resolve())
+        except ValueError:
+            return FileResponse(_CONSOLE_INDEX)
+        if candidate.is_file():
+            return FileResponse(candidate)
+        # SPA fallback — client-side router will resolve the path.
+        return FileResponse(_CONSOLE_INDEX)

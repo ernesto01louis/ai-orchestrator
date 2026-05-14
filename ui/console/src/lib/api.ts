@@ -29,14 +29,22 @@ import {
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "1";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// In dev (`npm run dev` on Vite :5173) requests go to `/api/*` so the
+// Vite proxy can rewrite to the FastAPI backend on :8000 (see
+// vite.config.ts). In production the SPA is served same-origin under
+// `/console` on the orchestrator process itself, so `/api/*` has no
+// proxy and FastAPI's routes live at the root. Strip the prefix
+// accordingly.
+const API_PREFIX = import.meta.env.DEV ? "/api" : "";
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
+  const res = await fetch(`${API_PREFIX}${path}`, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return (await res.json()) as T;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_PREFIX}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
