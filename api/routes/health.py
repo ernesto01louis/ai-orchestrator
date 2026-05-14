@@ -12,12 +12,12 @@ Endpoints:
 """
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 import requests
 from fastapi import APIRouter
 from fastapi.responses import Response
-
-import time
-from pathlib import Path
 
 from core.config import (
     HINDSIGHT_ENABLED,

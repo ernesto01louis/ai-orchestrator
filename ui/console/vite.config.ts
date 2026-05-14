@@ -10,6 +10,11 @@ import path from "node:path";
 //
 // During dev we proxy /api → backend so cookies / SameSite work cleanly.
 export default defineConfig({
+  // Phase 2.6 — the production bundle is mounted at /console on the
+  // FastAPI process (see app.py `_console_spa`), so all asset URLs in
+  // the generated index.html must be prefixed with /console/. Vite's
+  // dev server (port 5173) overrides this with "/" automatically.
+  base: "/console/",
   plugins: [react()],
   resolve: {
     alias: {

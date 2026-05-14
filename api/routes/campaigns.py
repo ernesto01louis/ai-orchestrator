@@ -136,8 +136,8 @@ def list_campaigns():
     operator-console Dashboard + Campaigns page can render without N+1
     fetches. All new fields are additive.
     """
-    from core import config as _config  # noqa: PLC0415
     from core import budget as _budget  # noqa: PLC0415
+    from core import config as _config  # noqa: PLC0415
 
     campaigns = load_campaigns()
     out = []
