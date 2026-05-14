@@ -349,3 +349,29 @@ def observe_eval_score(
     if safe_outcome in {"passed", "failed"}:
         clamped = max(0.0, min(1.0, float(score)))
         EVAL_SCORE.labels(metric=safe_metric, judge_model=safe_judge).observe(clamped)
+
+
+# ---------------------------------------------------------------------------
+# Repo-screening spike (2026-05-12) — firecrawl web ingest metrics
+# ---------------------------------------------------------------------------
+# ``outcome`` is one of {success, skipped_exists, http_error, empty,
+# disabled, invalid_url}. Bounded cardinality (~6 distinct values).
+# No URL or content-hash labels — Grafana correlates by per-request
+# logs/traces, not labels.
+
+WEB_INGEST_TOTAL = Counter(
+    "orchestrator_web_ingest_total",
+    "Firecrawl-backed web reference ingestion outcomes.",
+    ["outcome"],
+)
+
+WEB_INGEST_DURATION = Histogram(
+    "orchestrator_web_ingest_duration_seconds",
+    "Wall-clock duration of one references_pkg.web.ingest_url call.",
+    buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0],
+)
+
+
+def observe_web_ingest(*, outcome: str, duration_seconds: float) -> None:
+    WEB_INGEST_TOTAL.labels(outcome=outcome or "unknown").inc()
+    WEB_INGEST_DURATION.observe(max(0.0, float(duration_seconds)))

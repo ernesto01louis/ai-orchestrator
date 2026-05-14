@@ -492,6 +492,44 @@ description from a vision model when available.
   `memory_pkg.generate_embedding` and `find_similar` (per-chunk
   matching vs per-document) — that's a separate phase.
 
+**Web ingest primitive (repo-screening spike, 2026-05-12, DORMANT):**
+- `references_pkg/web.py` exposes one public function — `ingest_url(url)
+  -> IngestResult` — that POSTs to a self-hosted firecrawl `/v2/scrape`
+  endpoint and persists the returned markdown under
+  `references/web/<sha256>.md`. Files flow through the existing
+  `load_reference_content` pipeline like a PDF.
+- `WebIngestConfig` schema in `core/config_schema.py`: `enabled` /
+  `base_url` / `timeout_seconds` / `skip_if_exists`. Default
+  `base_url=http://192.168.2.189:3002` (LXC 206 `firecrawl-server`).
+- Three-condition `is_enabled()` gate (config + base_url + requests).
+  Any HTTP / timeout / malformed-response error is trapped and
+  returned as an `IngestResult` with `status='http_error'` and
+  `path=None`. The wrapper never raises.
+- The orchestrator never crawls autonomously — `ingest_url` is
+  operator/tool-initiated only (no scheduler hooks, no agent loop
+  calls). `skip_if_exists` makes re-calls idempotent: same URL hashes
+  to the same filename, won't overwrite a curated note unless flipped
+  off explicitly.
+- Saved markdown gets a small YAML frontmatter (`source_url`, `title`,
+  `status_code`) so the file is self-describing.
+- Startup healthcheck in `app.py:_lifespan` mirrors the Phase 3.3
+  NoteDiscovery shape — single-line log on success, warning on
+  unreachable, never fatal.
+- Prom instruments in `core/metrics.py`:
+    * Counter `orchestrator_web_ingest_total{outcome}` — outcome in
+      {success, skipped_exists, http_error, empty, disabled,
+      invalid_url}.
+    * Histogram `orchestrator_web_ingest_duration_seconds` —
+      0.1s-120s buckets. No URL or content-hash labels (Phase 1.8
+      cardinality discipline).
+- LXC 206 (firecrawl-server, 192.168.2.189, 4c/8GB/30GB) provisioned
+  via `scripts/install_firecrawl.sh`. Docker + compose + the firecrawl
+  self-host stack (api/playwright/redis/rabbitmq/nuq-postgres).
+- **No callsite in the orchestrator wires `ingest_url` in yet.**
+  Promoting it past "available primitive" (e.g. into a planner
+  research step the way Phase 3.3 NoteDiscovery did) is a separate
+  phase.
+
 **Eval primitive (repo-screening spike, 2026-05-11, DORMANT):**
 - `eval_pkg/scoring.py` exposes `score_response(input, actual_output,
   *, criteria, ...) -> EvalScore`. Backed by deepeval's G-Eval with
@@ -961,4 +999,19 @@ overly-terse good answer scored 0.0 on first run (run-to-run variance
 inherent to small judges on short outputs). Promoting eval into a
 "Phase 4.x eval campaign" — a first-class campaign type with curated
 prompts + expected outputs, scoreboard alongside model_stats.json,
-optional evidence-bundle calculator — is a separate phase.*
+optional evidence-bundle calculator — is a separate phase.
+
+2026-05-12 — Repo-screening firecrawl spike landed as an available
+primitive + live LXC. `references_pkg/web.py` exposes
+`ingest_url(url) -> IngestResult` backed by a self-hosted firecrawl
+`/v2/scrape` endpoint on LXC 206 (`firecrawl-server`, 192.168.2.189,
+4 cores / 8 GB RAM / 30 GB disk, Docker + compose with
+api/playwright/redis/rabbitmq/nuq-postgres). Dormant by default
+(`web_ingest.enabled=false`). Live end-to-end measurement: 3/3
+successful ingests (example.com 0.5s/180B, PEP 8 1.6s/57KB, Python
+json docs 0.9s/42KB), markdown round-trips cleanly with YAML
+frontmatter (source_url/title/status_code) into
+`references/web/<sha256>.md`. NOT wired into any callsite — promoting
+to a planner research step (the way Phase 3.3 NoteDiscovery did) is
+a separate phase. LXC 206 provisioning is one-shot via
+`scripts/install_firecrawl.sh`.*

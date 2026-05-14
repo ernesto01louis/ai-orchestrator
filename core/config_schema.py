@@ -405,6 +405,35 @@ class EvalConfig(_FlexModel):
     case_timeout_seconds: int = 120
 
 
+class WebIngestConfig(_FlexModel):
+    """Repo-screening spike (2026-05-12): firecrawl-backed web reference
+    ingestion.
+
+    Ships dormant — ``web_ingest.enabled=false`` keeps the primitive
+    inert. When enabled, ``references_pkg.web.ingest_url(url)`` POSTs
+    to the self-hosted firecrawl ``/v2/scrape`` endpoint and persists
+    the returned markdown into ``references/web/<sha256>.md`` so it
+    flows through the existing ``load_reference_content`` pipeline.
+
+    The orchestrator never crawls autonomously — ingestion is operator
+    /tooling-initiated only. ``base_url`` defaults to LXC 206
+    (``firecrawl-server``, 192.168.2.189). Path is ``/v2/scrape``
+    today (``/v0/scrape`` is deprecated upstream).
+    """
+
+    enabled: bool = False
+    base_url: str = "http://192.168.2.189:3002"
+    # Per-scrape wall-clock timeout. Live measurement on a small page
+    # (example.com) is sub-second; complex JS-rendered pages can take
+    # 20-30 seconds. 60s leaves headroom without letting a wedged
+    # firecrawl hang an interactive request forever.
+    timeout_seconds: int = 60
+    # Skip if a markdown file with the same source URL already exists
+    # under ``references/web/``. Keeps the ingest idempotent and avoids
+    # silently overwriting an operator-curated note.
+    skip_if_exists: bool = True
+
+
 class OrchestratorSettings(_FlexModel):
     """Validated view of config.json.
 
@@ -443,3 +472,4 @@ class OrchestratorSettings(_FlexModel):
     note_discovery: NoteDiscoveryConfig = NoteDiscoveryConfig()
     chunking: ChunkingConfig = ChunkingConfig()
     eval: EvalConfig = EvalConfig()
+    web_ingest: WebIngestConfig = WebIngestConfig()
