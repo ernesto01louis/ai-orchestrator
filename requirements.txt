@@ -8,7 +8,7 @@ bcrypt==5.0.0
 # blender-mcp moved to requirements-plugins.txt (PR 3.B audit B.7).
 # The orchestrator does not import blender-mcp at runtime — see
 # docs/PLUGINS.md.
-cachetools==6.2.6
+cachetools==7.1.1
 certifi==2026.1.4
 cffi==2.0.0
 charset-normalizer==3.4.4
