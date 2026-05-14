@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── theme tokens ─────────────────────────────────────────────────────
+   Default = operator-console aesthetic. The personal theme overrides
+   any of these via inline custom properties set by useTheme(). */
+:root,
+[data-theme="default"] {
+  --bg-0: oklch(0.155 0.006 250);
+  --bg-1: oklch(0.190 0.006 250);
+  --bg-2: oklch(0.225 0.007 250);
+  --bg-3: oklch(0.270 0.008 250);
+  --line: oklch(0.295 0.010 250);
+  --line-soft: oklch(0.245 0.008 250);
+
+  --fg-0: oklch(0.965 0.004 250);
+  --fg-1: oklch(0.820 0.006 250);
+  --fg-2: oklch(0.640 0.008 250);
+  --fg-3: oklch(0.490 0.008 250);
+
+  --accent: oklch(0.82 0.13 205);
+  --accent-soft: oklch(0.40 0.07 205 / 0.18);
+  --accent-line: oklch(0.55 0.10 205 / 0.45);
+
+  --ok: oklch(0.80 0.14 158);
+  --ok-soft: oklch(0.45 0.09 158 / 0.18);
+  --warn: oklch(0.84 0.14 88);
+  --warn-soft: oklch(0.50 0.10 88 / 0.20);
+  --err: oklch(0.72 0.18 25);
+  --err-soft: oklch(0.45 0.13 25 / 0.20);
+  --info: oklch(0.78 0.12 270);
+  --info-soft: oklch(0.45 0.10 270 / 0.20);
+
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Menlo", monospace;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background: var(--bg-0);
+    color: var(--fg-1);
+    font-size: 13px;
+    line-height: 1.5;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection { background: var(--accent-soft); color: var(--fg-0); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--bg-3); border-radius: 10px;
+    border: 2px solid var(--bg-0);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--line); }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer utilities {
+  .mono { font-family: var(--font-mono); font-variant-ligatures: none; }
+  .num  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .kbd  {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--bg-1);
+    color: var(--fg-1);
+  }
+  .row-hover:hover { background: var(--bg-1); }
+}
+
+/* terminal */
+.term {
+  background: oklch(0.13 0.005 250);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--fg-1);
+}
+.term .ln { padding: 0 12px; white-space: pre; }
+.term .ts { color: var(--fg-3); }
+.term .ph-planner   { color: var(--info); }
+.term .ph-generator { color: var(--accent); }
+.term .ph-judge     { color: var(--warn); }
+.term .ph-optimizer { color: var(--ok); }
+.term .lvl-err      { color: var(--err); }
