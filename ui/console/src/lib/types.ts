@@ -9,10 +9,27 @@ export type Phase =
   | "complete"
   | "failed";
 
-export type HitlMode = "full_auto" | "checkpoint" | "smartpause";
+/** All five HITL modes recognized by core.hitl (Phase 3.1).
+ * The handoff prototype only shipped three; the real backend can return
+ * any of these. `smartpause` is a UI alias the Hitl page uses to
+ * group SmartPause-triggered pauses; it is not a backend mode.
+ */
+export type HitlMode =
+  | "full_auto"
+  | "gate_only"
+  | "checkpoint"
+  | "step_by_step"
+  | "co_pilot"
+  | "smartpause";
 
-/** `null` = running normally; "smartpause" or `hitl:<mode>` when paused. */
-export type PausedState = null | "smartpause" | `hitl:${HitlMode}`;
+/** `null` = running normally; "smartpause" or `hitl:<phase>` when paused.
+ *
+ * Note: the backend stores the gated-phase name in the suffix (e.g.
+ * `hitl:post_planner`), not the HITL mode. The UI treats anything
+ * starting with `hitl:` as a checkpoint pause and reads the actual mode
+ * from `Run.hitl_mode`.
+ */
+export type PausedState = null | "smartpause" | `hitl:${string}`;
 
 export interface Run {
   id: string;

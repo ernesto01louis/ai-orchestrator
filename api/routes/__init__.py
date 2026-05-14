@@ -467,6 +467,7 @@ from . import (  # noqa: E402
     health,
     identity,
     memory,
+    observability,
     runs,
     websocket,
 )
@@ -481,4 +482,5 @@ router.include_router(content.router)
 router.include_router(admin.router)
 router.include_router(campaigns.router)
 router.include_router(runs.router)
+router.include_router(observability.router)
 router.include_router(websocket.router)
