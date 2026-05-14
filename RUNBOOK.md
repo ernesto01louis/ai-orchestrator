@@ -101,18 +101,55 @@ Edits, rotation, recovery, and multi-operator setup: see
 **Bypass for dev:** Plain `.env` (gitignored) still works — the
 systemd hook is a no-op when `.env.sops` is absent.
 
+## Nightly snapshot to TrueNAS
+
+`scripts/backup.sh` rsyncs the stateful runtime tree (memory/, vault/,
+projects/, config.json, .env, gates.json, gates_log.json,
+tool_registry.json) to `/mnt/nas-vault/Backups/ai-orchestrator/snapshots/<UTC-timestamp>/`
+with `--link-dest` against the previous snapshot. Code lives on
+GitHub; large data (references/, campaigns/) is on the DVC TrueNAS
+remote. Together that covers the full restore surface.
+
+Activate the nightly schedule:
+
+```sh
+# One-shot install (as root, on the orchestrator LXC):
+sudo /opt/ai-orchestrator/scripts/systemd/install_backup_timer.sh
+
+# Verify:
+systemctl status ai-orchestrator-backup.timer
+systemctl list-timers ai-orchestrator-backup.timer --no-pager
+
+# Fast-forward (skip the schedule, run NOW):
+sudo systemctl start ai-orchestrator-backup.service
+journalctl -u ai-orchestrator-backup.service -n 50
+```
+
+The timer fires at 03:30 UTC nightly (`Persistent=true` catches up
+after maintenance windows). The service unit caps memory at 4G and
+exits cleanly with status 2 when `/mnt/nas-vault` isn't mounted —
+that's expected, not an alert.
+
 ## Restore from backup
 
 The orchestrator's stateful paths (`memory/`, `vault/`, `references/`,
 `projects/`, `logs/`, `config.json`, `.env`, `gates.json`) are
-gitignored and need a separate backup channel (currently rsync to
-TrueNAS — see Phase 0.4).
+gitignored and live in two backup channels:
+
+- **rsync snapshots** (nightly to TrueNAS, see above) cover the
+  small-state paths (memory, vault, projects, config, .env, gates).
+- **DVC remote** on TrueNAS covers the large content paths
+  (`references/`, `campaigns/`) — see `scripts/dvc_track.sh` and
+  the Phase 1.4 RUNBOOK section.
 
 To restore:
 
 1. Stop the service: `systemctl stop ai-orchestrator`.
-2. Restore the data dirs from the backup tarball/rsync target.
+2. Restore the small-state dirs from the most recent snapshot under
+   `/mnt/nas-vault/Backups/ai-orchestrator/snapshots/`.
 3. `git pull` to make sure code matches the data version.
+4. `dvc pull` to materialize references/ + campaigns/ from the
+   TrueNAS DVC remote.
 4. `pip install -r requirements.txt` in venv.
 5. `systemctl start ai-orchestrator`.
 6. `curl http://127.0.0.1:8000/health` — should be green.

@@ -1,0 +1,37 @@
+# Codecov config for ai-orchestrator.
+#
+# Coverage runs nightly only (see .github/workflows/coverage.yml comment
+# for the OOM-budget rationale). We don't gate PRs on coverage —
+# patch-coverage status is off so PR authors aren't blocked by a check
+# that only refreshes at 03:00 UTC.
+#
+# Project status target: auto (compare against the latest base build).
+# Threshold: 1% wiggle room for stochastic test-collection differences
+# between runners.
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: false
+    patch:
+      default:
+        # Patch coverage measurement is meaningless when coverage only
+        # runs nightly. Disable so PRs aren't tagged with a stale
+        # "patch coverage = ?" status.
+        enabled: false
+
+comment:
+  # Skip the Codecov PR comment — the nightly cadence makes the comment
+  # always stale relative to the PR's actual diff.
+  require_changes: true
+
+ignore:
+  - "tests/"
+  - "examples/"
+  - "scripts/"
+  - "alembic/"
+  - "sky/"
+  - "docs/"

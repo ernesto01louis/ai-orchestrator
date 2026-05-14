@@ -1,9 +1,18 @@
-"""HTTP + WebSocket route handlers.
+"""HTTP + WebSocket route handlers (package).
 
-All 82 routes live on a single APIRouter for now. Plan calls for splitting
-by area (api/runs.py, api/memory.py, api/vault.py, etc.) — defer that
-sub-split to a follow-up; collapsing app.py's monolith into one router
-file is the immediate Phase 0 win.
+Originally a single ``api/routes.py`` module. Promoted to a package in
+audit Stage 5 §D.1 once the file crossed the 2,500-LoC threshold the
+audit itself set. The split is incremental — this ``__init__.py``
+still holds the routes that haven't been carved out yet, plus the
+``router`` aggregator that ``app.py`` imports.
+
+Sub-modules expose their own ``APIRouter`` named ``router`` and are
+wired in at the bottom of this file via ``router.include_router(...)``.
+
+Tests that import function-level symbols directly from ``api.routes``
+(e.g. ``from api.routes import create_campaign``) continue to work
+because the package re-exports those names alongside the sub-module
+imports.
 """
 from __future__ import annotations
 
@@ -972,78 +981,9 @@ def get_live_context_formatted(target: str = "pi-1"):
     return {"formatted": formatted}
 
 
-# ------------------------------------------------
-# API: OLLAMA MODELS
-# ------------------------------------------------
-
-@router.get("/models")
-def get_models():
-    """List all available and currently loaded models across both Ollama servers."""
-    return {
-        "loaded": get_loaded_models(),
-        "available": get_available_models()
-    }
-
-
-@router.get("/models/loaded")
-def get_models_loaded():
-    """Quick check: which models are currently hot in memory."""
-    return {"loaded": get_loaded_models()}
-
-
-# ------------------------------------------------
-# API: SYSTEM HEALTH
-# ------------------------------------------------
-
-@router.get("/health")
-def get_health():
-    """Orchestrator system health check."""
-
-    health = get_orchestrator_health()
-    active = get_active_runs()
-
-    # check Ollama server connectivity
-    ollama_status = {}
-    for name, url in [("main", OLLAMA_MAIN_URL), ("judge", OLLAMA_JUDGE_URL)]:
-        try:
-            r = requests.get(f"{url}/api/tags", timeout=5)
-            ollama_status[name] = {
-                "url": url,
-                "status": "online" if r.status_code == 200 else f"error ({r.status_code})",
-                "model_count": len(r.json().get("models", [])) if r.status_code == 200 else 0
-            }
-        except requests.exceptions.RequestException as e:
-            ollama_status[name] = {
-                "url": url,
-                "status": f"offline ({type(e).__name__})",
-                "model_count": 0
-            }
-
-    # check Hindsight connectivity
-    hindsight_health = {"enabled": HINDSIGHT_ENABLED}
-    if HINDSIGHT_ENABLED:
-        try:
-            r = requests.get(f"{HINDSIGHT_URL}/v1/default/banks", timeout=5)
-            hindsight_health["status"] = "online" if r.status_code == 200 else f"error ({r.status_code})"
-            hindsight_health["url"] = HINDSIGHT_URL
-        except requests.exceptions.RequestException as e:
-            hindsight_health["status"] = f"offline ({type(e).__name__})"
-            hindsight_health["url"] = HINDSIGHT_URL
-
-    return {
-        "orchestrator": health,
-        "ollama_servers": ollama_status,
-        "hindsight": hindsight_health,
-        "active_runs": len(active),
-        "uptime_indicator": "ok"
-    }
-
-
-@router.get("/metrics", include_in_schema=False)
-def get_metrics() -> Response:
-    """Prometheus metrics exposition (text/plain)."""
-    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+# Health / Ollama models / Prometheus metrics routes moved to
+# api/routes/health.py (audit Stage 5 §D.1). See bottom of file for
+# the include_router wire-up.
 
 
 # ------------------------------------------------
@@ -2529,8 +2469,6 @@ def get_evidence_crate_zip(campaign_id: str):
     import io
     import zipfile
 
-    from fastapi.responses import Response
-
     crate = _crate_or_404(campaign_id)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -2681,3 +2619,15 @@ def verify_campaign_merkle_route(campaign_id: str) -> dict[str, Any]:
         "mismatches": result.mismatches,
     }
 
+
+
+# ------------------------------------------------------------------
+# Sub-module aggregation
+# ------------------------------------------------------------------
+# Routes carved out into api/routes/<group>.py modules. Each sub-module
+# exposes its own ``router`` (APIRouter) which we mount on the package-
+# level ``router`` here. Public API surface is unchanged — FastAPI
+# treats nested include_router exactly like inline @router decoration.
+from . import health  # noqa: E402
+
+router.include_router(health.router)

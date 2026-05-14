@@ -1,0 +1,24 @@
+[Unit]
+Description=Nightly trigger for ai-orchestrator-backup.service
+Documentation=https://github.com/ernesto01louis/ai-orchestrator/blob/main/RUNBOOK.md
+
+[Timer]
+# 03:30 UTC nightly. Chosen to land after the coverage workflow's
+# 03:00 UTC cron-style trigger (which doesn't affect the orchestrator
+# LXC but parity is nice) and well before any working-hours load.
+OnCalendar=*-*-* 03:30:00 UTC
+
+# Catch up if the LXC was offline at the scheduled time (e.g. host
+# maintenance). RandomizedDelay smooths cron-thundering if multiple
+# LXCs share the same NFS target.
+Persistent=true
+RandomizedDelaySec=10m
+
+# Don't accumulate backlog if the service stalls — a single nightly
+# run is the contract.
+AccuracySec=1m
+
+Unit=ai-orchestrator-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -21,12 +21,35 @@ uvicorn app:app --host 0.0.0.0 --port 8000   # or via systemd unit
 ## Running checks before pushing
 
 ```bash
-pytest -q                                                   # 26 tests, < 1s
+pytest -q                                                   # 599 tests, ~1 min
 ruff check core llm notifications tools execution memory_pkg orchestration api references_pkg
 mypy core llm notifications tools execution                 # lenient — non-blocking
 ```
 
-The same set runs in CI on every PR (.github/workflows/ci.yml).
+The same set runs in CI on every PR (.github/workflows/ci.yml). 13
+additional tests are gated behind the `prefect_real` and `redis_real`
+markers and run against live services in their own CI jobs.
+
+## Coverage
+
+Coverage runs **nightly** via [.github/workflows/coverage.yml](.github/workflows/coverage.yml)
+(not on every PR — `pytest-cov` + Prefect's per-test server spin-up
+exhausts the GHA runner memory budget under the full instrumentation
+scope; OOM-kill would block every merge).
+
+Gate: `--cov-fail-under=40` over the **small-package** surface
+(`core`, `llm`, `notifications`, `tools`, `references_pkg`, `agents`,
+`manifest`, `cli`). The heavyweight packages (`orchestration/`,
+`api/`, `evidence/`, `memory_pkg/`, `execution/`, `prefect_io/`) are
+excluded until a parallel-coverage migration lands — tracked as a
+Phase 4+ backlog item.
+
+Aspirational target across the full surface is ≥80%. Anyone touching
+a heavyweight package is encouraged to add tests; the nightly gate
+keeps the small-package floor honest in the meantime.
+
+The nightly job uploads `coverage.xml` to Codecov; the badge on the
+README links to the trend graph.
 
 ## Commit conventions
 

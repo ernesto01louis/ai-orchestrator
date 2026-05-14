@@ -1,5 +1,9 @@
 # AI Orchestrator
 
+[![CI](https://github.com/ernesto01louis/ai-orchestrator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ernesto01louis/ai-orchestrator/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/ernesto01louis/ai-orchestrator/branch/main/graph/badge.svg)](https://codecov.io/gh/ernesto01louis/ai-orchestrator)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 > Autonomous research orchestrator that lets a solo engineer run AI-driven
 > scientific campaigns with memory, evidence, and reproducibility — so
 > "my AI proved X works better than Y" becomes a rigorous, citable claim

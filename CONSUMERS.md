@@ -37,6 +37,33 @@ The full export list is in
 [`ai_orchestrator_client/__init__.py`](https://github.com/ernesto01louis/ai-orchestrator-client/blob/main/ai_orchestrator_client/__init__.py)
 under `__all__`.
 
+## Version compatibility
+
+The orchestrator's REST + MCP surface follows semver via the
+`MCP_CONTRACT_VERSION` constant. Pin the SDK against a compatible
+range to track minor/patch updates without surprises.
+
+| Orchestrator release | `MCP_CONTRACT_VERSION` | Compatible client pin |
+|---|---|---|
+| `v0.3.x-phase3.x` (current) | `1.0.0` | `ai-orchestrator-client>=0.1.0a0,<0.2` |
+
+Future MCP contract major bumps (`2.0.0`, `3.0.0`, ...) will get their
+own row. PATCH bumps (`1.0.1`) and MINOR bumps (`1.1.0`) stay
+backward-compatible with the same client pin.
+
+## `project_name` validation
+
+The orchestrator validates `project_name` against
+`^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$` server-side (it's used as a directory
+name under `projects/`, so unsafe characters fail loudly). Starting
+with client `0.1.0a2`, the SDK mirrors the same regex client-side and
+raises `ProjectNameInvalidError` before the request leaves the process
+— this turns the opaque 422 into a typed exception with examples.
+
+Valid examples: `naca0012-baseline`, `riblet_sweep_v3`, `run.42`.
+Invalid: anything with spaces, slashes, `..`, or punctuation outside
+`[a-zA-Z0-9_\-\.]`.
+
 ## Minimum-viable consumer
 
 ```python

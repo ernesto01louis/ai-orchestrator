@@ -1,0 +1,181 @@
+name: otel-pin-check
+
+# Audit Stage 6 §B.9 — the OTel SDK pins in requirements.txt are
+# beta-channel (`0.62b1`) and our live tracing stack is Tempo 2.6.1 +
+# Grafana 12.4.3 (pinned for the reset-admin-password regression
+# reason; see CLAUDE.md "OTel beta-pin policy"). A coordinated bump of
+# the four OTel core packages + three instrumentation packages CAN
+# silently break the FastAPI auto-instrumentation contract — the
+# failure mode is missing HTTP-route spans, which goes unnoticed until
+# someone queries Tempo and sees a gap.
+#
+# This workflow runs `grafana/tempo:2.6.1` via `docker run` (not as a
+# GitHub Actions service container — Tempo 2.6 refuses to start
+# without an explicit config file, and service containers can't mount
+# files created during the job). The smoke test installs the current
+# pinned OTel SDK, emits a real span, and asserts the span lands in
+# Tempo. Triggered on PRs that touch requirements.txt or core/otel.py.
+
+on:
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "core/otel.py"
+      - ".github/workflows/otel-pin-check.yml"
+  workflow_dispatch: {}
+
+jobs:
+  otel-pin-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Write Tempo config
+        # Minimal single-binary Tempo config: OTLP/gRPC ingest on :4317,
+        # HTTP query on :3200, local storage at /tmp. Matches the LXC 204
+        # production config shape but with /tmp instead of /var/tempo.
+        run: |
+          mkdir -p /tmp/tempo
+          cat > /tmp/tempo/tempo.yaml <<'EOF'
+          server:
+            http_listen_port: 3200
+            grpc_listen_port: 9095
+          distributor:
+            receivers:
+              otlp:
+                protocols:
+                  grpc:
+                    endpoint: 0.0.0.0:4317
+                  http:
+                    endpoint: 0.0.0.0:4318
+          ingester:
+            max_block_duration: 5m
+          compactor:
+            compaction:
+              block_retention: 1h
+          storage:
+            trace:
+              backend: local
+              wal:
+                path: /var/tempo/wal
+              local:
+                path: /var/tempo/blocks
+          EOF
+
+      - name: Start Tempo container
+        run: |
+          docker run -d --name tempo \
+            -v /tmp/tempo/tempo.yaml:/etc/tempo.yaml:ro \
+            -p 4317:4317 \
+            -p 3200:3200 \
+            grafana/tempo:2.6.1 \
+            -config.file=/etc/tempo.yaml
+
+      - name: Wait for Tempo to accept OTLP
+        run: |
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/4317) 2>/dev/null \
+                && curl -sf http://127.0.0.1:3200/ready >/dev/null; then
+              echo "Tempo up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Tempo did not come up within 60s. Container logs:"
+          docker logs tempo
+          exit 1
+
+      - name: Install OTel SDK pins
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "opentelemetry-api==1.41.1" \
+            "opentelemetry-sdk==1.41.1" \
+            "opentelemetry-proto==1.41.1" \
+            "opentelemetry-exporter-otlp-proto-common==1.41.1" \
+            "opentelemetry-exporter-otlp-proto-grpc==1.41.1" \
+            "opentelemetry-instrumentation==0.62b1" \
+            "opentelemetry-instrumentation-asgi==0.62b1" \
+            "opentelemetry-instrumentation-fastapi==0.62b1" \
+            "opentelemetry-instrumentation-requests==0.62b1" \
+            "fastapi==0.115.0" \
+            "pydantic>=2.7" \
+            "requests"
+
+      - name: Emit + verify span
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4317"
+          OTEL_SERVICE_NAME: "ai-orchestrator-otel-pin-check"
+        run: |
+          python <<'PY'
+          """Mirror of core/otel.py:init_tracing — emit a span, then
+          poll Tempo /api/search until it arrives or 60s timeout."""
+          import os, time, urllib.request, urllib.parse, json
+
+          from opentelemetry import trace
+          from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+              OTLPSpanExporter,
+          )
+          from opentelemetry.sdk.resources import Resource
+          from opentelemetry.sdk.trace import TracerProvider
+          from opentelemetry.sdk.trace.export import BatchSpanProcessor
+          from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
+          service_name = os.environ["OTEL_SERVICE_NAME"]
+          endpoint = os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"]
+
+          resource = Resource.create({
+              "service.name": service_name,
+              "service.version": "ci-pin-check",
+          })
+          provider = TracerProvider(
+              resource=resource,
+              sampler=TraceIdRatioBased(1.0),
+          )
+          exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
+          provider.add_span_processor(BatchSpanProcessor(exporter))
+          trace.set_tracer_provider(provider)
+
+          tracer = trace.get_tracer(__name__)
+          with tracer.start_as_current_span("pin-check-span") as span:
+              span.set_attribute("ci.run_id", os.environ.get("GITHUB_RUN_ID", "local"))
+              span.set_attribute("ci.test", "otel-pin")
+
+          provider.shutdown()
+          time.sleep(2)
+
+          query = urllib.parse.urlencode({"tags": f"service.name={service_name}"})
+          url = f"http://127.0.0.1:3200/api/search?{query}"
+
+          last_err = None
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen(url, timeout=5) as resp:
+                      body = json.loads(resp.read().decode())
+                  traces = body.get("traces") or []
+                  if traces:
+                      print(f"Tempo returned {len(traces)} trace(s) for service={service_name}")
+                      print(json.dumps(traces[0], indent=2))
+                      raise SystemExit(0)
+              except SystemExit:
+                  raise
+              except Exception as e:  # noqa: BLE001
+                  last_err = e
+              time.sleep(1)
+
+          print(f"Span never arrived in Tempo. Last error: {last_err}")
+          print("Tempo container logs:")
+          os.system("docker logs tempo | tail -50")
+          raise SystemExit(1)
+          PY
+
+      - name: Tempo container logs (on failure)
+        if: failure()
+        run: docker logs tempo
