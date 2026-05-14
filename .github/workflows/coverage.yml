@@ -63,3 +63,15 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 30
+
+      # Codecov publishes the badge + trend graph linked from README.
+      # Tokenless for OSS public repos. fail_ci_if_error=false keeps a
+      # codecov outage from breaking the nightly job — the artifact
+      # upload above is the local-of-record copy.
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+          verbose: false
