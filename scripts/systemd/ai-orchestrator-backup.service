@@ -1,0 +1,38 @@
+[Unit]
+Description=AI Orchestrator nightly snapshot to TrueNAS
+Documentation=https://github.com/ernesto01louis/ai-orchestrator/blob/main/RUNBOOK.md
+# Wait until the TrueNAS NFS mount is up. /mnt/nas-vault is the rsync
+# target — without it the script aborts cleanly (exit 2) but firing
+# the unit at all is wasted scheduling.
+RequiresMountsFor=/mnt/nas-vault
+# Don't compete with a live orchestrator run. ai-orchestrator.service
+# is the FastAPI app; the snapshot is consistent enough across short
+# concurrent writes (rsync re-runs nightly anyway), so this is advisory.
+After=ai-orchestrator.service
+
+[Service]
+Type=oneshot
+# Must run as root: the snapshot includes .env (chmod 600) and
+# memory/ paths owned by root.
+User=root
+Group=root
+WorkingDirectory=/opt/ai-orchestrator
+ExecStart=/opt/ai-orchestrator/scripts/backup.sh
+
+# Log capture: stdout/stderr go to the journal.
+StandardOutput=journal
+StandardError=journal
+
+# Failure handling: surface via the existing notify_failure path on the
+# orchestrator service ONLY if scripts/backup.sh exits non-zero AND
+# we're not aborting because the mount is missing (exit 2 = expected).
+# systemd treats both as "failed" but the journal entry distinguishes.
+SuccessExitStatus=0 2
+
+# Resource ceiling — rsync of memory/ + vault/ + projects/ stays well
+# under 4G even on a multi-month-old install; cap to catch runaway.
+MemoryHigh=2G
+MemoryMax=4G
+
+[Install]
+WantedBy=multi-user.target
