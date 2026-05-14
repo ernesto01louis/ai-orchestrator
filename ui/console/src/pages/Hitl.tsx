@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Edit, Hand, RefreshCw, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge, TONE, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfidenceBar } from "@/components/ConfidenceBar";
 import { PhaseBadge } from "@/components/PhaseBadge";
 import { useRuns } from "@/lib/queries";
 import * as api from "@/lib/api";
@@ -119,19 +120,6 @@ function QueueItem({ run, active, onSelect }: { run: Run; active: boolean; onSel
         </div>
       )}
     </div>
-  );
-}
-
-function ConfidenceBar({ value, w = 80 }: { value: number; w?: number }) {
-  const tone: Tone = value >= 0.7 ? "ok" : value >= 0.4 ? "warn" : "err";
-  const c = TONE[tone];
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="bg-bg-3 rounded-[2px] overflow-hidden" style={{ width: w, height: 4 }}>
-        <span className={`block h-full ${c.dot}`} style={{ width: `${value * 100}%` }} />
-      </span>
-      <span className={`num text-[10.5px] ${c.fg}`}>{value.toFixed(2)}</span>
-    </span>
   );
 }
 
