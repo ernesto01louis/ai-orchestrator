@@ -58,10 +58,10 @@ def mini_campaign():
     )
 
     with ExitStack() as stack:
-        stack.enter_context(patch("api.routes.validate_target"))
+        stack.enter_context(patch("api.routes.campaigns.validate_target"))
         stack.enter_context(
             patch(
-                "api.routes.submit_campaign",
+                "api.routes.campaigns.submit_campaign",
                 return_value={"campaign_id": "ignored", "flow_run_id": "fake-frid"},
             )
         )

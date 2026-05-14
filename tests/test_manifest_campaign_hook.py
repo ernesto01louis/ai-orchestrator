@@ -52,10 +52,10 @@ def _make_campaign(tmp_campaign_dir: Path, tmp_projects_dir: Path) -> str:
     )
 
     with ExitStack() as stack:
-        stack.enter_context(patch("api.routes.validate_target"))
+        stack.enter_context(patch("api.routes.campaigns.validate_target"))
         stack.enter_context(
             patch(
-                "api.routes.submit_campaign",
+                "api.routes.campaigns.submit_campaign",
                 return_value={"campaign_id": "ignored", "flow_run_id": "fake-frid"},
             )
         )
