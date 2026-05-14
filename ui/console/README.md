@@ -11,9 +11,21 @@ cp .env.example .env
 pnpm dev
 ```
 
-By default `VITE_USE_MOCKS=1` is set, so the UI runs without the FastAPI
-backend — fixtures live in `src/lib/mocks.ts`. Comment that out to fetch
-real data via the Vite proxy (`/api/*` → `VITE_API_BASE`).
+By default `VITE_USE_MOCKS=0` — the UI fetches live data from the
+FastAPI backend via the Vite proxy (`/api/*` → `VITE_API_BASE`). Flip
+to `1` if you want to develop pages standalone against the fixtures in
+`src/lib/mocks.ts` (faster iteration on visuals, no backend required).
+
+## Production mount
+
+The build output is served by the orchestrator process at
+`/console` (see [app.py](../../app.py) — the StaticFiles mount is
+guarded by an existence check on `ui/console/dist`).
+
+```bash
+cd ui/console && npm install && npm run build
+# orchestrator restart picks up the new bundle automatically
+```
 
 ## Project layout
 
