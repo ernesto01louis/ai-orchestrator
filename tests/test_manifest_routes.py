@@ -128,7 +128,7 @@ def test_status_includes_manifest_status_when_completed(tmp_path, client, monkey
 
     # Register a completed run with manifest_status already set (hot path).
     _register_run(run_id, project, manifest_status="ok")
-    monkeypatch.setattr("api.routes.PROJECTS_DIR", str(tmp_path))
+    monkeypatch.setattr("api.routes.runs.PROJECTS_DIR", str(tmp_path))
 
     resp = client.get(f"/status/{run_id}")
     assert resp.status_code == 200
@@ -146,7 +146,7 @@ def test_status_lazy_verify_when_unset(tmp_path, client, monkeypatch):
 
     # Completed run with manifest_status=None (simulate pre-Phase-D run).
     _register_run(run_id, project, manifest_status=None, completed=True)
-    monkeypatch.setattr("api.routes.PROJECTS_DIR", str(tmp_path))
+    monkeypatch.setattr("api.routes.runs.PROJECTS_DIR", str(tmp_path))
 
     resp = client.get(f"/status/{run_id}")
     assert resp.status_code == 200
@@ -187,7 +187,7 @@ def test_run_verify_endpoint_ok(tmp_path, client, monkeypatch):
     project = "verify-proj"
     _make_run_dir(tmp_path, run_id, project=project)
     _register_run(run_id, project, manifest_status=None)
-    monkeypatch.setattr("api.routes.PROJECTS_DIR", str(tmp_path))
+    monkeypatch.setattr("api.routes.runs.PROJECTS_DIR", str(tmp_path))
 
     resp = client.get(f"/runs/{run_id}/verify")
     assert resp.status_code == 200
@@ -204,7 +204,7 @@ def test_run_verify_endpoint_corrupted(tmp_path, client, monkeypatch):
     project = "corrupt-proj"
     run_dir = _make_run_dir(tmp_path, run_id, project=project)
     _register_run(run_id, project, manifest_status=None)
-    monkeypatch.setattr("api.routes.PROJECTS_DIR", str(tmp_path))
+    monkeypatch.setattr("api.routes.runs.PROJECTS_DIR", str(tmp_path))
 
     # Tamper with a tracked file after manifest was written.
     (run_dir / "score.txt").write_text("TAMPERED\n")
@@ -264,8 +264,8 @@ def test_campaign_verify_merkle_endpoint_ok(tmp_path, client, monkeypatch):
     _register_campaign(campaign_id)
 
     # Redirect the path constants used by the route handler.
-    monkeypatch.setattr("api.routes.PROJECTS_DIR", str(projects_root))
-    monkeypatch.setattr("api.routes.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
+    monkeypatch.setattr("api.routes.campaigns.PROJECTS_DIR", str(projects_root))
+    monkeypatch.setattr("api.routes.campaigns.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
 
     resp = client.get(f"/campaigns/{campaign_id}/verify-merkle")
 
@@ -291,8 +291,8 @@ def test_campaign_verify_merkle_endpoint_corrupted(tmp_path, client, monkeypatch
     manifest_path = projects_root / project / "runs" / run_id_a / "manifest.json"
     manifest_path.write_bytes(manifest_path.read_bytes() + b"\x00")
 
-    monkeypatch.setattr("api.routes.PROJECTS_DIR", str(projects_root))
-    monkeypatch.setattr("api.routes.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
+    monkeypatch.setattr("api.routes.campaigns.PROJECTS_DIR", str(projects_root))
+    monkeypatch.setattr("api.routes.campaigns.CAMPAIGN_TEMPLATES_DIR", tmp_path / "campaigns")
 
     resp = client.get(f"/campaigns/{campaign_id}/verify-merkle")
 
