@@ -9,11 +9,12 @@ name: otel-pin-check
 # failure mode is missing HTTP-route spans, which goes unnoticed until
 # someone queries Tempo and sees a gap.
 #
-# This workflow spins up a `grafana/tempo:2.6.1` service container,
-# installs the current pinned OTel SDK, emits a real span via the
-# orchestrator's `core.otel.init_tracing` wiring, and asserts the
-# span lands in Tempo. Triggered on PRs that touch requirements.txt
-# (so dependency bumps get exercised) or on demand.
+# This workflow runs `grafana/tempo:2.6.1` via `docker run` (not as a
+# GitHub Actions service container — Tempo 2.6 refuses to start
+# without an explicit config file, and service containers can't mount
+# files created during the job). The smoke test installs the current
+# pinned OTel SDK, emits a real span, and asserts the span lands in
+# Tempo. Triggered on PRs that touch requirements.txt or core/otel.py.
 
 on:
   pull_request:
@@ -28,23 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    services:
-      # Tempo single-binary configured to accept OTLP/gRPC on :4317.
-      # `--config.file=/etc/tempo/tempo.yaml` would need a config
-      # volume; instead we rely on the image's default config which
-      # already exposes :4317 (OTLP gRPC) and :3200 (HTTP query).
-      # Matches LXC 204 (`tempo-server` 192.168.2.187, Tempo 2.6.1).
-      tempo:
-        image: grafana/tempo:2.6.1
-        ports:
-          - 4317:4317  # OTLP gRPC ingest
-          - 3200:3200  # HTTP query (search/trace)
-        options: >-
-          --health-cmd "wget -q -O- http://localhost:3200/ready || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
     steps:
       - uses: actions/checkout@v5
 
@@ -53,10 +37,62 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install OTel SDK pins (and grpc transport)
-        # Install ONLY the OTel packages + their direct dependencies.
-        # Skipping requirements.txt's full transitive surface keeps
-        # the job under a minute and isolates the contract under test.
+      - name: Write Tempo config
+        # Minimal single-binary Tempo config: OTLP/gRPC ingest on :4317,
+        # HTTP query on :3200, local storage at /tmp. Matches the LXC 204
+        # production config shape but with /tmp instead of /var/tempo.
+        run: |
+          mkdir -p /tmp/tempo
+          cat > /tmp/tempo/tempo.yaml <<'EOF'
+          server:
+            http_listen_port: 3200
+            grpc_listen_port: 9095
+          distributor:
+            receivers:
+              otlp:
+                protocols:
+                  grpc:
+                    endpoint: 0.0.0.0:4317
+                  http:
+                    endpoint: 0.0.0.0:4318
+          ingester:
+            max_block_duration: 5m
+          compactor:
+            compaction:
+              block_retention: 1h
+          storage:
+            trace:
+              backend: local
+              wal:
+                path: /var/tempo/wal
+              local:
+                path: /var/tempo/blocks
+          EOF
+
+      - name: Start Tempo container
+        run: |
+          docker run -d --name tempo \
+            -v /tmp/tempo/tempo.yaml:/etc/tempo.yaml:ro \
+            -p 4317:4317 \
+            -p 3200:3200 \
+            grafana/tempo:2.6.1 \
+            -config.file=/etc/tempo.yaml
+
+      - name: Wait for Tempo to accept OTLP
+        run: |
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/4317) 2>/dev/null \
+                && curl -sf http://127.0.0.1:3200/ready >/dev/null; then
+              echo "Tempo up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Tempo did not come up within 60s. Container logs:"
+          docker logs tempo
+          exit 1
+
+      - name: Install OTel SDK pins
         run: |
           python -m pip install --upgrade pip
           pip install \
@@ -73,40 +109,15 @@ jobs:
             "pydantic>=2.7" \
             "requests"
 
-      - name: Wait for Tempo to accept OTLP
-        # Service container health is gated on /ready, but the OTLP
-        # listener can take a few extra seconds to bind. Poll the gRPC
-        # port directly.
-        run: |
-          for i in $(seq 1 30); do
-            if (echo > /dev/tcp/127.0.0.1/4317) 2>/dev/null; then
-              echo "Tempo OTLP listener up after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Tempo OTLP listener did not come up within 30s"
-          exit 1
-
       - name: Emit + verify span
         env:
           OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4317"
           OTEL_SERVICE_NAME: "ai-orchestrator-otel-pin-check"
         run: |
           python <<'PY'
-          """Minimal smoke test that mirrors core/otel.py:init_tracing.
-
-          We can't import core.otel directly here (it depends on
-          core.config which depends on the orchestrator's full stack).
-          Instead we replicate the init pattern with the same SDK pins
-          and assert Tempo received the span — that's the contract
-          the workflow guards.
-          """
-          import os
-          import time
-          import urllib.request
-          import urllib.parse
-          import json
+          """Mirror of core/otel.py:init_tracing — emit a span, then
+          poll Tempo /api/search until it arrives or 60s timeout."""
+          import os, time, urllib.request, urllib.parse, json
 
           from opentelemetry import trace
           from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
@@ -137,17 +148,14 @@ jobs:
               span.set_attribute("ci.run_id", os.environ.get("GITHUB_RUN_ID", "local"))
               span.set_attribute("ci.test", "otel-pin")
 
-          # Flush before querying Tempo.
           provider.shutdown()
           time.sleep(2)
 
-          # Query Tempo /api/search for our service.
-          # Tempo's search needs ~5s to index after ingest.
           query = urllib.parse.urlencode({"tags": f"service.name={service_name}"})
           url = f"http://127.0.0.1:3200/api/search?{query}"
 
           last_err = None
-          for attempt in range(30):
+          for attempt in range(60):
               try:
                   with urllib.request.urlopen(url, timeout=5) as resp:
                       body = json.loads(resp.read().decode())
@@ -156,10 +164,18 @@ jobs:
                       print(f"Tempo returned {len(traces)} trace(s) for service={service_name}")
                       print(json.dumps(traces[0], indent=2))
                       raise SystemExit(0)
-              except Exception as e:  # noqa: BLE001 — defensive on transient errors
+              except SystemExit:
+                  raise
+              except Exception as e:  # noqa: BLE001
                   last_err = e
               time.sleep(1)
 
           print(f"Span never arrived in Tempo. Last error: {last_err}")
+          print("Tempo container logs:")
+          os.system("docker logs tempo | tail -50")
           raise SystemExit(1)
           PY
+
+      - name: Tempo container logs (on failure)
+        if: failure()
+        run: docker logs tempo
