@@ -359,3 +359,18 @@ from orchestration import (  # noqa: E402, F401
 from api.routes import router as _api_router  # noqa: E402
 
 app.include_router(_api_router)
+
+# ── Phase 2.6 operator console (static SPA) ─────────────────────────────
+# Mounted at /console so the legacy /ui/graph.html admin route in
+# api/routes/admin.py:382 keeps working. The mount is guarded by an
+# existence check on the build output so fresh checkouts that haven't
+# run ``cd ui/console && npm run build`` yet won't crash on import.
+from pathlib import Path as _Path  # noqa: E402
+
+_CONSOLE_DIST = _Path(__file__).parent / "ui" / "console" / "dist"
+if _CONSOLE_DIST.is_dir():
+    app.mount(
+        "/console",
+        StaticFiles(directory=str(_CONSOLE_DIST), html=True),
+        name="console",
+    )
