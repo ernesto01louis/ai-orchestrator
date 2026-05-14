@@ -579,6 +579,60 @@ description from a vision model when available.
 - `tests/examples/test_example_consumer_smoke.py` enforces the
   consumer-internal-import guard via source-text scan.
 
+**Operator console (Phase 2.6, LIVE):**
+- Lives at ``ui/console/`` — Vite + React 18 + TypeScript +
+  Tailwind 3.4 scaffold from the 2026-05-14 Claude Designs handoff.
+  React Query 5 + react-router 6. `@tanstack/react-query` + a small
+  WebSocket hook for `/ws`. No global state library.
+- Three production-ready pages: **Dashboard** (metric strip with
+  sparklines, paused-runs warning strip, active runs table, budget
+  card, live `/ws` log tail, recent campaigns), **Runs**
+  (filterable list + per-run detail with phase timeline, provenance
+  KV, live log tail, manifest verify, intervene actions), and
+  **HITL Console** (queue sidebar, planner-output review with
+  approve/edit/reject/skip/abort, confidence bar for SmartPause).
+- Four deferred stubs (Campaigns / Logs / Memory / Config) render a
+  placeholder with planned content + endpoint lists per the
+  handoff's "next round" deferral.
+- Mounted at ``/console`` on the FastAPI process — same-origin, no
+  separate web server. Guarded by ``Path("ui/console/dist").is_dir()``
+  so fresh checkouts don't crash on import. Catch-all
+  ``GET /console/{path:path}`` falls back to ``index.html`` for
+  react-router client-side routes; path-traversal hardened via
+  ``Path.resolve().relative_to(dist)``.
+- ``DEFAULT_PUBLIC_PREFIXES = ("/console",)`` in ``core/auth.py`` lets
+  the SPA shell load without a bearer token; the API endpoints it
+  calls still respect ``ORCHESTRATOR_API_TOKEN``. Operator token UX
+  (login form / localStorage) is a follow-up.
+- Theme contract: ``default`` (operator-facing oklch palette) and
+  ``personal`` (anime-inspired override layer, ships **empty token
+  stub** at ``src/theme/personal.ts``). Toggle via
+  ``window.__setTheme("personal")`` in DevTools — there is
+  intentionally no UI switcher in the default skin.
+- Backend bridging (Phase 2.6.3) keeps the contract additive — the
+  Python client SDK and all existing REST consumers continue to work.
+  New shapes: ``/health.services`` flat dict + ``uptime_s`` +
+  ``version``; ``/runs`` and ``/status/{id}`` enriched with ``id``,
+  ``campaign_id``, ``model``, ``started_at``, ``paused``,
+  ``hitl_mode``, ``confidence``; ``/metrics.json`` JSON-shaped
+  sibling to the Prometheus text endpoint;
+  ``/runs/{id}/manifest/verify`` alias; ``/runs/{id}/intervene``
+  accepts both ``payload`` (frontend) and ``prompt`` (original) plus
+  the full action set ``{approve, reject, edit, skip, abort}``; WS
+  log envelopes carry ``ts``; ``/campaigns`` enriched with
+  ``hitl_mode``, ``children``, ``completed``, ``failed``,
+  ``budget``, ``grid``.
+- Dev mode (``cd ui/console && npm run dev``) serves the SPA at
+  Vite's ``:5173`` with ``/api/*`` proxied to FastAPI at
+  ``VITE_API_BASE`` (default ``http://localhost:8000``). Build with
+  ``npm run build`` and reload the orchestrator to publish a new
+  bundle.
+- Mocks remain available — flip ``VITE_USE_MOCKS=1`` to bypass the
+  backend entirely and develop against ``src/lib/mocks.ts``
+  fixtures (7 runs / 4 campaigns / synthetic ``/ws`` emitter).
+  Default is ``0`` (live data) since the backend bridging is in
+  place.
+
 **Operator notes — caveats + policies:**
 
 *HITL config precedence.* Three sources for `hitl_mode`, evaluated in
@@ -783,7 +837,11 @@ removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
     +73 net new tests (404 → 479). Ships dormant
     (``sky.enabled=false``); operators configure provider creds
     (e.g. ``RUNPOD_API_KEY``), run ``sky check``, flip the flag.
-2.6 New UI — pending.
+2.6 New UI — DONE (v0.3.4-phase2.6, 2026-05-14). Operator console at
+    ``/console`` on the orchestrator process. Stack: React 18 + Vite 6
+    + Tailwind 3.4 + react-query 5 + react-router 6. Lives at
+    ``ui/console/`` — see `What EXISTS` "Operator console (Phase 2.6)"
+    below for the full feature inventory.
 
 ### Phase 3 — advanced
 HITL modes, SmartPause, NoteDiscovery-grounded planner, example consumer.

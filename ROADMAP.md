@@ -325,25 +325,56 @@ Moved to Phase 4+ backlog (see below). Activates the day
 `sky.enabled=true` AND a paid-provider key is configured; until then,
 no code, no LXC.
 
-### 2.6 New UI — IN FLIGHT
-- [x] Framework decision: **React 19 + Vite + TypeScript + Tailwind v4**
-      (decided 2026-05-08, shipped in PR (a) below).
-- [x] **PR (a) Foundation** on `feat/phase2.6-new-ui-foundation`
-      (PR #22): Vite scaffold, design tokens (oklch), `useTheme` hook
-      with `default | personal` modes, shared atoms (Card, Badge,
-      Button, LiveDot, Sparkline, PhaseBadge, ScoreBar, BudgetBar,
-      ConfidenceBar, KV, Terminal), sidebar + topbar shell, REST +
-      WebSocket seams, 7 routes wired (3 placeholders + 4 stub pages).
-- [ ] **PR (b) Pages**: pixel-fidelity port of Dashboard / Runs (list +
-      detail) / HITL Console from the Claude-Design prototype.
-- [ ] **PR (c) Serving + docs**: FastAPI route at `/console` serving
-      `ui/console/dist/`; new `/metrics_console` endpoint shaping
-      dashboard data; CLAUDE / ROADMAP / RUNBOOK updates; optional
-      CI build step.
-- [ ] **Personal theme stub** at `ui/console/src/themes/personal.ts`
+### 2.6 New UI — DONE (v0.3.4-phase2.6, shipped 2026-05-14)
+Pivoted from React 19 + Tailwind v4 (PR #22 draft) to **React 18 +
+Vite 6 + Tailwind 3.4 + react-query 5 + react-router 6** when a fresh
+Claude-Design handoff arrived 2026-05-14 with a complete codebase
+scaffold on the simpler stack. Closed PR #22, branched fresh, shipped
+in one PR with seven atomic commits on `feat/phase2.6-operator-console`.
+- [x] **2.6.1 Scaffold drop** — handoff `codebase/` → `ui/console/`.
+      22 source files: Dashboard / RunsList / RunDetail / Hitl pages
+      fully built; Campaigns / Logs / Memory / Config are deferred
+      stubs (per handoff README's "next round"). Atom layer:
+      Card, Badge, Button, PhaseBadge, ScoreBar, BudgetBar,
+      Sparkline, LiveDot, Terminal, KV. Shell: AppShell, Sidebar,
+      Topbar. Theme: `default | personal` w/ `window.__setTheme`
+      hook + oklch tokens.
+- [x] **2.6.2 ConfidenceBar atom** — extracted from inline JSX in
+      Hitl.tsx to a standalone component (ported from PR #22's
+      `>=0.7 ok / 0.4-0.7 warn / <0.4 err` threshold scheme).
+- [x] **2.6.3 Backend contract bridging** — additive endpoint
+      enrichment so the handoff's API expectations work against the
+      real FastAPI: `/health.services` flat dict + `uptime_s` +
+      `version`; `/runs` and `/status/{id}` enriched with `id`,
+      `campaign_id`, `model`, `started_at`, `paused`, `hitl_mode`,
+      `confidence`; new `/metrics.json` JSON-shaped sibling to the
+      Prometheus `/metrics` text endpoint;
+      `GET /runs/{id}/manifest/verify` alias; intervene accepts both
+      `payload` and `prompt` fields and the full action set
+      {approve, reject, edit, skip, abort}; WS log envelopes carry
+      `ts`; `/campaigns` enriched with hitl_mode + children/completed/
+      failed counts + budget + grid.
+- [x] **2.6.4 Static mount** at `/console` (with deep-link fallback)
+      so react-router client-side routes serve `index.html`. Path-
+      traversal hardened. Legacy `/ui/graph.html` admin route keeps
+      working (single-segment match).
+- [x] **2.6.5 Live data default** — `VITE_USE_MOCKS=0` in `.env.example`;
+      mocks still available for design iteration.
+- [x] **2.6.6 SPA deep-link fallback + auth bypass** —
+      `DEFAULT_PUBLIC_PREFIXES = ("/console",)` so the SPA shell loads
+      without a bearer token (its API calls still respect auth).
+- [x] **2.6.7 Docs + roadmap close-out** — CLAUDE.md / ROADMAP.md /
+      RUNBOOK.md updates; closed PR #22 as superseded.
+- [x] **Personal theme stub** at `ui/console/src/theme/personal.ts`
       ships empty — operator fills in the anime-inspired override
       palette + animations in a follow-up. Theme switching already
       wired (`__setTheme("personal")` in the browser console).
+- [ ] **Phase 2.6.x follow-ups (deferred to future rounds per handoff
+      README):** Campaigns page (list + detail, param grid, evidence
+      bundle download/verify, NoteDiscovery research trace); Live
+      Logs (full-bleed terminal tailing /ws across all runs); Memory
+      & Gates (memory search, model stats, gates list with enable/
+      disable toggles); Config (read-only /health + feature flags).
 
 ---
 

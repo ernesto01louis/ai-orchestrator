@@ -1208,3 +1208,86 @@ bundle picks them up as `references` and emits them as RO-Crate
 Flip `note_discovery.enabled = false` in `config.json` and restart.
 The planner falls back to its existing memory stack on every search
 call; existing `planner_research.json` traces remain on disk.
+
+
+## Operator console (Phase 2.6)
+
+Lives at ``ui/console/`` — a Vite + React 18 + TypeScript SPA served
+from the orchestrator process at ``http://orchestrator:8000/console/``.
+
+### Building
+
+```bash
+cd /opt/ai-orchestrator/ui/console
+npm install            # first time only — pulls ~280 deps
+npm run typecheck      # tsc -b --noEmit
+npm run build          # tsc -b && vite build → ui/console/dist/
+```
+
+After ``npm run build``, restart the orchestrator (or any process
+serving ``app.py``) to pick up the new bundle. The mount is guarded
+by an existence check on ``ui/console/dist/`` so fresh checkouts
+that haven't built yet don't crash on import.
+
+### Developing
+
+For pixel-iteration on existing pages, run Vite's dev server with
+HMR:
+
+```bash
+cd /opt/ai-orchestrator/ui/console
+npm run dev            # http://localhost:5173
+```
+
+Vite proxies ``/api/*`` → ``VITE_API_BASE`` (default
+``http://localhost:8000``) and ``/ws`` → ``ws://...`` with the
+WebSocket protocol enabled. So the orchestrator must be running for
+``/api/health``, ``/api/runs``, etc. to resolve.
+
+To develop without a backend (e.g. visual-only design work on the
+four stub pages), set ``VITE_USE_MOCKS=1`` in ``ui/console/.env``
+and the fixtures in ``src/lib/mocks.ts`` take over — 7 runs, 4
+campaigns, a synthetic ``/ws`` emitter ticking every 750ms.
+
+### Theming
+
+The default theme matches the operator-console aesthetic in the
+handoff prototype: dark oklch palette, IBM Plex Sans/Mono,
+dense-information layout. The ``personal`` theme is an empty
+override stub at ``src/theme/personal.ts`` for the operator's
+future anime-inspired skin.
+
+Toggle in DevTools without a UI switcher:
+
+```js
+window.__setTheme("personal")  // reload picks up the override
+window.__setTheme("default")
+```
+
+This is intentional — the default skin has no theme dropdown.
+
+### Auth
+
+The SPA shell is in ``DEFAULT_PUBLIC_PREFIXES`` so it loads without
+a bearer token. The REST + WS endpoints it calls still respect
+``ORCHESTRATOR_API_TOKEN`` — if you set it for production, the UI
+will load but every panel will be empty until an operator login
+flow is added (Phase 2.6.x follow-up). On the homelab where the
+token is unset, everything just works.
+
+### Verifying
+
+```bash
+# Smoke check
+curl -s http://localhost:8000/console/ | grep 'id="root"'        # SPA index
+curl -s http://localhost:8000/console/dashboard | grep 'id="root"' # deep link
+curl -s http://localhost:8000/metrics.json | python -m json.tool  # backend JSON
+curl -s http://localhost:8000/health | python -m json.tool | grep services
+```
+
+### Deferred to future rounds
+
+The four stub pages (Campaigns, Live Logs, Memory & Gates, Config)
+render placeholders with planned content + endpoint lists. They
+will be designed in a follow-up handoff — see the "Phase 2.6.x
+follow-ups" entry in ROADMAP.md.
