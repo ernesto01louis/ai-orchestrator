@@ -34,7 +34,7 @@ def patched_campaigns(monkeypatch: pytest.MonkeyPatch) -> dict:
     # sites the route can reach (api.routes uses _CAMPAIGNS via
     # load_campaigns, mocked through memory_pkg).
     monkeypatch.setattr("memory_pkg.load_campaigns", lambda: campaigns)
-    monkeypatch.setattr("api.routes.load_campaigns", lambda: campaigns, raising=False)
+    monkeypatch.setattr("api.routes.campaigns.load_campaigns", lambda: campaigns, raising=False)
     return campaigns
 
 

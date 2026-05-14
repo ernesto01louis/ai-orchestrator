@@ -62,8 +62,12 @@ for p in "${PATHS[@]}"; do
 done
 
 # Update a 'latest' symlink so consumers (RESTORE.md scenario A) don't
-# have to ls and pick.
-ln -sfn "$SNAPSHOT" "$BACKUP_ROOT/latest"
+# have to ls and pick. Best-effort — some filesystems (CIFS / SMB
+# share without UNIX-extensions) don't support symlinks; in that case
+# fall back to a 'latest.txt' pointer with the snapshot path.
+if ! ln -sfn "$SNAPSHOT" "$BACKUP_ROOT/latest" 2>/dev/null; then
+    echo "$SNAPSHOT" > "$BACKUP_ROOT/latest.txt"
+fi
 
 du_total="$(du -sh --apparent-size "$SNAPSHOT" 2>/dev/null | cut -f1 || echo '?')"
 echo "[backup] OK $SNAPSHOT ($du_total apparent)"
