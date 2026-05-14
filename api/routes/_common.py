@@ -13,7 +13,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 # Filename safety regex (mirrors server-side SAFE_FILENAME in
 # app.py / api/routes/__init__.py / orchestration / llm.extract).
 SAFE_FILENAME = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]+$")
