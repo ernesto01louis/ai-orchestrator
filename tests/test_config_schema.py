@@ -207,7 +207,14 @@ def test_postgres_unknown_keys_tolerated() -> None:
 
 
 def test_core_config_exposes_postgres_constants() -> None:
-    """core.config must export the POSTGRES_* derived constants."""
+    """core.config must export the POSTGRES_* derived constants.
+
+    Checks the constants exist and have the expected shape on whatever
+    config.json the live install uses. The "is False by default"
+    assertion belongs in a separate test driven off config.example.json
+    (see test_postgres_example_dormant below) — otherwise this test
+    fails on any LXC where the operator activated Postgres.
+    """
     import core.config as cfg  # noqa: PLC0415
 
     assert hasattr(cfg, "POSTGRES_ENABLED")
@@ -216,9 +223,15 @@ def test_core_config_exposes_postgres_constants() -> None:
     assert hasattr(cfg, "POSTGRES_POOL_MAX_OVERFLOW")
     assert hasattr(cfg, "POSTGRES_STATEMENT_TIMEOUT_MS")
     assert hasattr(cfg, "POSTGRES_RECONCILE_ON_STARTUP")
-    # Defaults from config.example.json keep the feature dormant
-    assert cfg.POSTGRES_ENABLED is False
+    assert isinstance(cfg.POSTGRES_ENABLED, bool)
     assert isinstance(cfg.POSTGRES_POOL_SIZE, int)
+
+
+def test_postgres_example_dormant() -> None:
+    """config.example.json must keep postgres dormant (Phase 2.1 contract)."""
+    raw = _load_example()
+    settings = OrchestratorSettings.model_validate(raw)
+    assert settings.postgres.enabled is False
 
 
 def test_missing_optional_redis_block_uses_defaults() -> None:

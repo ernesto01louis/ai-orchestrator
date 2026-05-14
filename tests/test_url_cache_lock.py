@@ -117,6 +117,11 @@ def test_ttl_expiry_triggers_single_refresh(monkeypatch: pytest.MonkeyPatch) -> 
     mock_get = MagicMock(return_value=fake_resp)
     monkeypatch.setattr("llm.ollama.requests.get", mock_get)
 
+    # Phase 2.2.4 added a Redis cache fast-path inside _refresh_url_cache —
+    # when Redis has a fresh hash, it short-circuits before the HTTP calls.
+    # Force the Redis path to miss so we exercise the HTTP fallback.
+    monkeypatch.setattr("core.redis_cache.url_cache_get_all", lambda: None)
+
     # Prime the cache as if it was refreshed recently.
     monkeypatch.setattr("llm.ollama._url_cache_ts", time.time())
     monkeypatch.setattr("llm.ollama._url_cache", {"gemma": "http://fake"})
