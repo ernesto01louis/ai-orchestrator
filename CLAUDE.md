@@ -135,6 +135,10 @@ index, model stats with per-language/per-role/per-project-type tracking.
 - Each role: system_prompt.md, user_prompt.md, schema.json, optional
   language variants
 - `agents/loader.py` — `load_agent`, `reload_all`, `list_roles`
+- `POST /agents/reload` — REST endpoint that calls `reload_all()` at
+  runtime. The "hot-reload" claim is honest: edit a prompt or schema
+  on disk, POST to /agents/reload, the next agent call picks up the
+  change. No restart required.
 
 **Tools:**
 - Registry in `tool_registry.json` (CRUD via `/tools` endpoints)
