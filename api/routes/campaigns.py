@@ -395,8 +395,6 @@ def get_evidence_crate_zip(campaign_id: str):
     import io
     import zipfile
 
-    from fastapi.responses import Response
-
     crate = _crate_or_404(campaign_id)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
