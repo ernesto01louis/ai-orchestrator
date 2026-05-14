@@ -1,9 +1,18 @@
-"""HTTP + WebSocket route handlers.
+"""HTTP + WebSocket route handlers (package).
 
-All 82 routes live on a single APIRouter for now. Plan calls for splitting
-by area (api/runs.py, api/memory.py, api/vault.py, etc.) — defer that
-sub-split to a follow-up; collapsing app.py's monolith into one router
-file is the immediate Phase 0 win.
+Originally a single ``api/routes.py`` module. Promoted to a package in
+audit Stage 5 §D.1 once the file crossed the 2,500-LoC threshold the
+audit itself set. The split is incremental — this ``__init__.py``
+still holds the routes that haven't been carved out yet, plus the
+``router`` aggregator that ``app.py`` imports.
+
+Sub-modules expose their own ``APIRouter`` named ``router`` and are
+wired in at the bottom of this file via ``router.include_router(...)``.
+
+Tests that import function-level symbols directly from ``api.routes``
+(e.g. ``from api.routes import create_campaign``) continue to work
+because the package re-exports those names alongside the sub-module
+imports.
 """
 from __future__ import annotations
 
