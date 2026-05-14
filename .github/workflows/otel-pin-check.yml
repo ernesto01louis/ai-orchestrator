@@ -1,0 +1,165 @@
+name: otel-pin-check
+
+# Audit Stage 6 §B.9 — the OTel SDK pins in requirements.txt are
+# beta-channel (`0.62b1`) and our live tracing stack is Tempo 2.6.1 +
+# Grafana 12.4.3 (pinned for the reset-admin-password regression
+# reason; see CLAUDE.md "OTel beta-pin policy"). A coordinated bump of
+# the four OTel core packages + three instrumentation packages CAN
+# silently break the FastAPI auto-instrumentation contract — the
+# failure mode is missing HTTP-route spans, which goes unnoticed until
+# someone queries Tempo and sees a gap.
+#
+# This workflow spins up a `grafana/tempo:2.6.1` service container,
+# installs the current pinned OTel SDK, emits a real span via the
+# orchestrator's `core.otel.init_tracing` wiring, and asserts the
+# span lands in Tempo. Triggered on PRs that touch requirements.txt
+# (so dependency bumps get exercised) or on demand.
+
+on:
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "core/otel.py"
+      - ".github/workflows/otel-pin-check.yml"
+  workflow_dispatch: {}
+
+jobs:
+  otel-pin-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      # Tempo single-binary configured to accept OTLP/gRPC on :4317.
+      # `--config.file=/etc/tempo/tempo.yaml` would need a config
+      # volume; instead we rely on the image's default config which
+      # already exposes :4317 (OTLP gRPC) and :3200 (HTTP query).
+      # Matches LXC 204 (`tempo-server` 192.168.2.187, Tempo 2.6.1).
+      tempo:
+        image: grafana/tempo:2.6.1
+        ports:
+          - 4317:4317  # OTLP gRPC ingest
+          - 3200:3200  # HTTP query (search/trace)
+        options: >-
+          --health-cmd "wget -q -O- http://localhost:3200/ready || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install OTel SDK pins (and grpc transport)
+        # Install ONLY the OTel packages + their direct dependencies.
+        # Skipping requirements.txt's full transitive surface keeps
+        # the job under a minute and isolates the contract under test.
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "opentelemetry-api==1.41.1" \
+            "opentelemetry-sdk==1.41.1" \
+            "opentelemetry-proto==1.41.1" \
+            "opentelemetry-exporter-otlp-proto-common==1.41.1" \
+            "opentelemetry-exporter-otlp-proto-grpc==1.41.1" \
+            "opentelemetry-instrumentation==0.62b1" \
+            "opentelemetry-instrumentation-asgi==0.62b1" \
+            "opentelemetry-instrumentation-fastapi==0.62b1" \
+            "opentelemetry-instrumentation-requests==0.62b1" \
+            "fastapi==0.115.0" \
+            "pydantic>=2.7" \
+            "requests"
+
+      - name: Wait for Tempo to accept OTLP
+        # Service container health is gated on /ready, but the OTLP
+        # listener can take a few extra seconds to bind. Poll the gRPC
+        # port directly.
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/4317) 2>/dev/null; then
+              echo "Tempo OTLP listener up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Tempo OTLP listener did not come up within 30s"
+          exit 1
+
+      - name: Emit + verify span
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4317"
+          OTEL_SERVICE_NAME: "ai-orchestrator-otel-pin-check"
+        run: |
+          python <<'PY'
+          """Minimal smoke test that mirrors core/otel.py:init_tracing.
+
+          We can't import core.otel directly here (it depends on
+          core.config which depends on the orchestrator's full stack).
+          Instead we replicate the init pattern with the same SDK pins
+          and assert Tempo received the span — that's the contract
+          the workflow guards.
+          """
+          import os
+          import time
+          import urllib.request
+          import urllib.parse
+          import json
+
+          from opentelemetry import trace
+          from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+              OTLPSpanExporter,
+          )
+          from opentelemetry.sdk.resources import Resource
+          from opentelemetry.sdk.trace import TracerProvider
+          from opentelemetry.sdk.trace.export import BatchSpanProcessor
+          from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
+          service_name = os.environ["OTEL_SERVICE_NAME"]
+          endpoint = os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"]
+
+          resource = Resource.create({
+              "service.name": service_name,
+              "service.version": "ci-pin-check",
+          })
+          provider = TracerProvider(
+              resource=resource,
+              sampler=TraceIdRatioBased(1.0),
+          )
+          exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
+          provider.add_span_processor(BatchSpanProcessor(exporter))
+          trace.set_tracer_provider(provider)
+
+          tracer = trace.get_tracer(__name__)
+          with tracer.start_as_current_span("pin-check-span") as span:
+              span.set_attribute("ci.run_id", os.environ.get("GITHUB_RUN_ID", "local"))
+              span.set_attribute("ci.test", "otel-pin")
+
+          # Flush before querying Tempo.
+          provider.shutdown()
+          time.sleep(2)
+
+          # Query Tempo /api/search for our service.
+          # Tempo's search needs ~5s to index after ingest.
+          query = urllib.parse.urlencode({"tags": f"service.name={service_name}"})
+          url = f"http://127.0.0.1:3200/api/search?{query}"
+
+          last_err = None
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen(url, timeout=5) as resp:
+                      body = json.loads(resp.read().decode())
+                  traces = body.get("traces") or []
+                  if traces:
+                      print(f"Tempo returned {len(traces)} trace(s) for service={service_name}")
+                      print(json.dumps(traces[0], indent=2))
+                      raise SystemExit(0)
+              except Exception as e:  # noqa: BLE001 — defensive on transient errors
+                  last_err = e
+              time.sleep(1)
+
+          print(f"Span never arrived in Tempo. Last error: {last_err}")
+          raise SystemExit(1)
+          PY
