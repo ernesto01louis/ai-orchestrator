@@ -8,6 +8,7 @@ const TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/runs": "Runs",
   "/hitl": "HITL Console",
+  "/timeline": "Activity Timeline",
   "/campaigns": "Campaigns",
   "/logs": "Live Logs",
   "/memory": "Memory & Gates",

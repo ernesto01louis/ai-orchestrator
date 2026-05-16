@@ -4,6 +4,7 @@ import { Dashboard } from "@/pages/Dashboard";
 import { RunsList } from "@/pages/RunsList";
 import { RunDetail } from "@/pages/RunDetail";
 import { Hitl } from "@/pages/Hitl";
+import { Timeline } from "@/pages/Timeline";
 import { Stub } from "@/pages/Stub";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/runs" element={<RunsList />} />
         <Route path="/runs/:runId" element={<RunDetail />} />
         <Route path="/hitl" element={<Hitl />} />
+        <Route path="/timeline" element={<Timeline />} />
         <Route path="/campaigns" element={<Stub routeId="campaigns" />} />
         <Route path="/logs" element={<Stub routeId="logs" />} />
         <Route path="/memory" element={<Stub routeId="memory" />} />

@@ -18,8 +18,10 @@ import type {
   Phase,
   PausedState,
   Run,
+  TimelineEvent,
 } from "./types";
 import {
+  MOCK_ACTIVITY,
   MOCK_CAMPAIGNS,
   MOCK_HEALTH,
   MOCK_METRICS,
@@ -207,6 +209,13 @@ export async function intervene(
     action: raw.action,
     applied_at: new Date().toISOString(),
   };
+}
+
+export async function getActivity(): Promise<TimelineEvent[]> {
+  if (USE_MOCKS) { await sleep(120); return structuredClone(MOCK_ACTIVITY); }
+  // Backend returns the TimelineEvent shape directly — no transform.
+  const data = await get<{ events: TimelineEvent[] }>("/activity");
+  return data.events ?? [];
 }
 
 export async function verifyManifest(runId: string): Promise<{ verified: boolean; sha256: string }> {

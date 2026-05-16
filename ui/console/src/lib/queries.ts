@@ -3,7 +3,7 @@
 
 import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import * as api from "./api";
-import type { Campaign, Health, Metrics, Run } from "./types";
+import type { Campaign, Health, Metrics, Run, TimelineEvent } from "./types";
 
 export const qk = {
   health: () => ["health"] as const,
@@ -11,6 +11,7 @@ export const qk = {
   runs: () => ["runs"] as const,
   run: (id: string) => ["run", id] as const,
   campaigns: () => ["campaigns"] as const,
+  activity: () => ["activity"] as const,
 };
 
 type Opt<T> = Omit<UseQueryOptions<T, Error, T, readonly unknown[]>, "queryKey" | "queryFn">;
@@ -35,3 +36,6 @@ export const useRun = (id: string, opt?: Opt<Run | undefined>) =>
 
 export const useCampaigns = (opt?: Opt<Campaign[]>) =>
   useQuery({ queryKey: qk.campaigns(), queryFn: api.getCampaigns, refetchInterval: 5_000, ...opt });
+
+export const useActivity = (opt?: Opt<TimelineEvent[]>) =>
+  useQuery({ queryKey: qk.activity(), queryFn: api.getActivity, refetchInterval: 8_000, ...opt });

@@ -126,3 +126,18 @@ export interface WsStatus {
 }
 
 export type WsMessage = WsLog | WsStatus;
+
+// ── Activity timeline (operator console Timeline page) ──────────────
+export type TimelineEventType = "run" | "campaign" | "git";
+
+/** One entry in the chronological activity feed (GET /activity). */
+export interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  timestamp: string; // ISO 8601
+  title: string;
+  details: string;
+  tags: string[];
+  /** Where clicking the event navigates; null = no detail page. */
+  link: { path: string; id?: string } | null;
+}

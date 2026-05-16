@@ -6,6 +6,7 @@ import type {
   Health,
   Metrics,
   Run,
+  TimelineEvent,
   WsMessage,
 } from "./types";
 
@@ -204,6 +205,45 @@ export const MOCK_METRICS: Metrics = {
     gpu: genSpark(99, 40, 70, 10),
   },
 };
+
+export const MOCK_ACTIVITY: TimelineEvent[] = [
+  {
+    id: "git:abc1234",
+    type: "git",
+    timestamp: ago(600),
+    title: "feat(evidence): citation-grade bundles for deterministic runs",
+    details: "commit abc1234de",
+    tags: ["commit", "feat"],
+    link: null,
+  },
+  {
+    id: "campaign-completed:c-42",
+    type: "campaign",
+    timestamp: ago(3_600),
+    title: "Campaign 'naca0012-baseline' completed",
+    details: "2 run(s), status completed",
+    tags: ["campaign", "completed"],
+    link: { path: "/campaigns", id: "c-42" },
+  },
+  {
+    id: "run:9f2a1b3c",
+    type: "run",
+    timestamp: ago(5_400),
+    title: "Run 9f2a1b3c — complete",
+    details: "project naca0012-baseline, target aero-research, score 7.0",
+    tags: ["naca0012-baseline", "complete"],
+    link: { path: "/runs", id: "9f2a1b3c" },
+  },
+  {
+    id: "campaign-created:c-42",
+    type: "campaign",
+    timestamp: ago(9_000),
+    title: "Campaign 'naca0012-baseline' created",
+    details: "2 run(s), status running",
+    tags: ["campaign", "created"],
+    link: { path: "/campaigns", id: "c-42" },
+  },
+];
 
 const SAMPLE_LINES: Array<[string, string]> = [
   ["planner", "decomposing task: 4 sub-goals identified"],

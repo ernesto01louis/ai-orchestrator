@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Activity, Box, Brain, ChevronDown, Hand, Layers,
+  Activity, Box, Brain, ChevronDown, Hand, History, Layers,
   Settings, Terminal as TerminalIcon, Circle,
 } from "lucide-react";
 import { LiveDot } from "@/components/LiveDot";
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/campaigns",  label: "Campaigns",      Icon: Box,          hot: "g c", stub: true },
   { to: "/logs",       label: "Live Logs",      Icon: TerminalIcon, hot: "g l", stub: true },
   { to: "/hitl",       label: "HITL Console",   Icon: Hand,         hot: "g h", badgeKey: "paused" as const },
+  { to: "/timeline",   label: "Timeline",       Icon: History,      hot: "g t" },
   { to: "/memory",     label: "Memory & Gates", Icon: Brain,        hot: "g m", stub: true },
   { to: "/config",     label: "Config",         Icon: Settings,     hot: "g s", stub: true },
 ];
