@@ -378,6 +378,7 @@ class _BundleBuilder:
                     status=_run_status_to_record(run.status),
                     started_at=timestamps[0],
                     finished_at=timestamps[1],
+                    provenance_mode=self._read_provenance_mode(project_dir),
                 )
             )
         return records
@@ -390,6 +391,23 @@ class _BundleBuilder:
             return json.loads(exec_path.read_text())
         except (OSError, json.JSONDecodeError):
             return None
+
+    def _read_provenance_mode(self, project_dir: Path) -> str:
+        """Read provenance_mode from the run's plan.json; default 'llm_pipeline'.
+
+        A deterministic run (core/deterministic_run.py) stamps
+        provenance_mode='deterministic' into its plan.json so the bundle
+        marks an empty llm_calls[] as intentional, not degraded.
+        """
+        plan_path = project_dir / "plan.json"
+        if not plan_path.exists():
+            return "llm_pipeline"
+        try:
+            plan = json.loads(plan_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return "llm_pipeline"
+        mode = plan.get("provenance_mode", "llm_pipeline")
+        return mode if mode in ("llm_pipeline", "deterministic") else "llm_pipeline"
 
     def _read_timestamps(self, project_dir: Path) -> tuple[datetime, datetime]:
         """Best-effort start/finish from the project dir's mtime range.

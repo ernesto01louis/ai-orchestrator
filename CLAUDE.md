@@ -664,6 +664,23 @@ publishable-grade output. (Phase 2 tech-debt PR adds a stub
 records are flagged `call_id="fallback-<uuid>"`, `model_digest="unavailable"`
 to make the degradation visible to verifiers.)
 
+*Deterministic runs get a first-class evidence bundle.* Not every run
+goes through the planner/generator/judge pipeline — a CFD campaign
+whose bash recipe is fully fixed in the campaign YAML may be executed
+directly (e.g. over SSH). Such a run has no `LLM_CALL_LOG` entries,
+and that is **correct, not degraded**: its citation-grade provenance
+is the git SHA + input params + solver version + per-run SHA256
+manifest + campaign Merkle root + DSSE signature — none of which need
+an LLM. `core/deterministic_run.py:register_deterministic_run` writes
+such a run into the layout `evidence.builder.build_bundle` expects and
+stamps `plan.json` with `provenance_mode="deterministic"`. The builder
+reads that into `RunRecord.provenance_mode`; the `compute` calculator
+reports `n_deterministic_runs` so a reader sees the empty `llm_calls[]`
+is intentional. Build the bundle standalone with
+`orchestrator build-bundle <campaign_id>`. Distinguish: the
+*Prefect-fallback* case above is genuine degradation (an LLM run that
+lost its trace); a *deterministic* run never had an LLM trace to lose.
+
 *OTel beta-pin policy.* The OpenTelemetry SDK is pinned at
 `0.62b1` / `1.41.1` — a coordinated **beta-channel** group across
 four packages (`opentelemetry-api`, `opentelemetry-sdk`,

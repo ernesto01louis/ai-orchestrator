@@ -44,8 +44,16 @@ def compute_evidence(
         c.response_tokens for r in runs for c in r.llm_calls
     )
 
+    # Split runs by provenance so a reader knows whether a zero
+    # llm_call_count is a gap (LLM-pipeline run missing its trace) or
+    # expected (deterministic run — no LLM was ever in the loop).
+    n_deterministic = sum(1 for r in runs if r.provenance_mode == "deterministic")
+    n_llm_pipeline = len(runs) - n_deterministic
+
     output = {
         "n_runs": len(runs),
+        "n_llm_pipeline_runs": n_llm_pipeline,
+        "n_deterministic_runs": n_deterministic,
         "total_wall_clock_seconds": total_wall_clock,
         "per_run_seconds": per_run_seconds,
         "llm_call_count": llm_call_count,
