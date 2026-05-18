@@ -169,5 +169,11 @@
     "base_url": "http://192.168.2.203:8010",
     "top_k": 8,
     "timeout_seconds": 30
+  },
+  "consumers": {
+    "_comment": "Phase 3.6 external consumer registry + capability dispatch. The registry endpoints (/consumers, /capabilities/{cap}/invoke) are always available, bearer-auth gated. health_poll_seconds=0 keeps the consumer-health daemon dormant; set >0 to poll each registered consumer's /healthz. dispatch_timeout_seconds bounds an outbound capability-invoke proxy call.",
+    "enabled": true,
+    "health_poll_seconds": 0,
+    "dispatch_timeout_seconds": 30.0
   }
 }

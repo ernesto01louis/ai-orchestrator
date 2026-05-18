@@ -404,6 +404,30 @@ in one PR with seven atomic commits on `feat/phase2.6-operator-console`.
 ### 3.5 (Removed) Multi-orchestrator federation
 - Per VISION.md: "probably unnecessary." Dropped.
 
+### 3.6 External consumer registry + capability dispatch — IN PROGRESS
+
+Generic (domain-neutral) surface that lets external research projects
+register as *consumers*, declare capabilities, push data in, and expose
+capability endpoints the orchestrator can dispatch work to. Driven by the
+rf-direction-finding Stage 7 integration; any consumer project benefits,
+so it belongs in the orchestrator per the platform-not-hub test.
+
+- [ ] `api/routes/consumers.py` — registry endpoints
+  - `POST /consumers/register` — register/upsert (name, base_url,
+    capabilities, callback_token, description)
+  - `GET /consumers` / `GET /consumers/{id}` — discovery
+  - `DELETE /consumers/{id}` — deregister
+  - `POST /consumers/{id}/heartbeat` — liveness ping
+- [ ] `POST /capabilities/{capability}/invoke` — outbound proxy: find the
+  consumer offering the capability, POST to its `base_url`, return result
+- [ ] Optional health daemon polling each consumer's `/healthz`
+  (`consumers.health_poll_seconds`; `0` = dormant)
+- [ ] Data-plane push: `POST /consumers/{id}/{memory,vault,notify,evidence}`
+- [ ] `consumers.json` registry — JSON canonical, file-locked. **No
+  Postgres mirror**: the map is small, read on demand, and there is no
+  aggregate-query need today. Revisit if a consumers dashboard lands.
+- [ ] Bearer auth enforced (existing middleware); Prometheus counters
+
 ---
 
 ## Phase 4 — Exploratory (post-2.6, not committed)

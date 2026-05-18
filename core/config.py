@@ -229,3 +229,12 @@ WEB_INGEST_ENABLED = _settings.web_ingest.enabled
 WEB_INGEST_BASE_URL = _settings.web_ingest.base_url
 WEB_INGEST_TIMEOUT_SECONDS = int(_settings.web_ingest.timeout_seconds)
 WEB_INGEST_SKIP_IF_EXISTS = bool(_settings.web_ingest.skip_if_exists)
+
+# Phase 3.6: external consumer registry + capability dispatch. The
+# registry endpoints are always available (bearer-auth gated);
+# CONSUMERS_HEALTH_POLL_SECONDS=0 keeps the health daemon dormant.
+CONSUMERS_ENABLED = bool(_settings.consumers.enabled)
+CONSUMERS_HEALTH_POLL_SECONDS = int(_settings.consumers.health_poll_seconds)
+CONSUMERS_DISPATCH_TIMEOUT_SECONDS = float(
+    _settings.consumers.dispatch_timeout_seconds
+)
