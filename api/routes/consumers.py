@@ -6,10 +6,11 @@ declares a set of capabilities. Registration is the discovery surface:
 ``GET /consumers`` lets the planner (and operators) see which projects
 offer which capabilities.
 
-This module is the registry half — register / list / get / delete /
-heartbeat. Capability dispatch and the data-plane push endpoints
-(memory / vault / notify / evidence) are appended by later Phase 3.6
-commits but share the helpers here.
+This module covers the registry (register / list / get / delete /
+heartbeat) and capability dispatch — ``POST /capabilities/{cap}/invoke``
+proxies a call to whichever registered consumer offers the capability.
+The data-plane push endpoints (memory / vault / notify / evidence) are
+appended by a later Phase 3.6 commit but share the helpers here.
 
 Every endpoint is bearer-auth gated by the existing
 ``BearerTokenAuthMiddleware`` — there is no public-path entry for
@@ -24,10 +25,12 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+import requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from core.metrics import observe_consumer_registration
+from core.config import CONSUMERS_DISPATCH_TIMEOUT_SECONDS
+from core.metrics import observe_consumer_invocation, observe_consumer_registration
 from memory_pkg import load_consumers, save_consumers
 
 router = APIRouter()
@@ -155,3 +158,103 @@ def consumer_heartbeat(consumer_id: str) -> dict[str, Any]:
     registry[consumer_id] = record
     save_consumers(registry)
     return {"status": "ok", "consumer_id": consumer_id, "heartbeat_at": now}
+
+
+# ── capability dispatch ──────────────────────────────────────────────
+
+
+def _find_capability_provider(capability: str) -> dict[str, Any] | None:
+    """Return the registered consumer offering ``capability``, or None.
+
+    First match wins — the registry is a flat map and a capability is
+    expected to be offered by at most one consumer in practice.
+    """
+    for record in load_consumers().values():
+        if capability in (record.get("capabilities") or []):
+            return record
+    return None
+
+
+class CapabilityInvokeRequest(BaseModel):
+    """Body for ``POST /capabilities/{capability}/invoke`` — an opaque
+    JSON payload forwarded verbatim to the consumer's capability handler."""
+
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/capabilities/{capability}/invoke")
+def invoke_capability(
+    capability: str, req: CapabilityInvokeRequest
+) -> dict[str, Any]:
+    """Dispatch a capability call to the consumer that offers it.
+
+    Looks up the provider, POSTs the payload to
+    ``{base_url}/capabilities/{capability}`` presenting the consumer's
+    stored ``callback_token`` as a bearer token, and returns the
+    consumer's response. The outbound call is bounded by
+    ``consumers.dispatch_timeout_seconds`` so a slow consumer can never
+    hang this request.
+
+    404 — no registered consumer offers the capability.
+    502 — the consumer returned an error or unparseable body.
+    504 — the consumer did not respond within the dispatch timeout.
+    """
+    provider = _find_capability_provider(capability)
+    if provider is None:
+        observe_consumer_invocation(capability, "not_found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No registered consumer offers capability '{capability}'",
+        )
+
+    url = f"{provider['base_url']}/capabilities/{capability}"
+    headers = {}
+    token = provider.get("callback_token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        resp = requests.post(
+            url,
+            json=req.payload,
+            headers=headers,
+            timeout=CONSUMERS_DISPATCH_TIMEOUT_SECONDS,
+        )
+    except requests.Timeout:
+        observe_consumer_invocation(capability, "timeout")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Consumer '{provider['consumer_id']}' timed out",
+        ) from None
+    except requests.RequestException as exc:
+        observe_consumer_invocation(capability, "consumer_error")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Consumer '{provider['consumer_id']}' unreachable: {exc}",
+        ) from None
+
+    if resp.status_code >= 400:
+        observe_consumer_invocation(capability, "consumer_error")
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Consumer '{provider['consumer_id']}' returned "
+                f"{resp.status_code}"
+            ),
+        )
+
+    try:
+        result = resp.json()
+    except ValueError:
+        observe_consumer_invocation(capability, "consumer_error")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Consumer '{provider['consumer_id']}' returned non-JSON",
+        ) from None
+
+    observe_consumer_invocation(capability, "success")
+    return {
+        "capability": capability,
+        "consumer_id": provider["consumer_id"],
+        "result": result,
+    }

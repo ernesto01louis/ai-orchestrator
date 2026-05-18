@@ -195,6 +195,16 @@ async def _lifespan(app_instance):
     except Exception as e:
         print(f"WARNING: firecrawl healthcheck failed at startup: {e}")
 
+    # Phase 3.6 consumer-health daemon. Polls each registered
+    # consumer's /healthz on an interval. No-op when
+    # ``consumers.health_poll_seconds=0`` (the default) — a dormant
+    # deploy issues no outbound probes. Idempotent.
+    try:
+        from core.consumer_health import start_consumer_health_daemon  # noqa: PLC0415
+        start_consumer_health_daemon()
+    except Exception as e:
+        print(f"WARNING: consumer-health daemon failed to start: {e}")
+
     # Start MCP session manager (required for streamable HTTP)
     async with mcp_instance.session_manager.run():
         yield
