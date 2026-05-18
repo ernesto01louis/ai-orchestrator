@@ -375,3 +375,52 @@ WEB_INGEST_DURATION = Histogram(
 def observe_web_ingest(*, outcome: str, duration_seconds: float) -> None:
     WEB_INGEST_TOTAL.labels(outcome=outcome or "unknown").inc()
     WEB_INGEST_DURATION.observe(max(0.0, float(duration_seconds)))
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.6 external consumer registry metrics
+# ---------------------------------------------------------------------------
+# Cardinality bounded:
+# - registrations ``outcome`` is one of {registered, updated, deregistered}.
+# - invocations ``capability`` is the dotted capability name (a small set
+#   declared by registered consumers); ``outcome`` is one of {success,
+#   not_found, consumer_error, timeout}.
+# - ingestions ``type`` is one of {memory, vault, notify, evidence};
+#   ``outcome`` is one of {success, failure, forbidden}.
+# No consumer_id label — Grafana correlates by consumer_id via logs.
+
+CONSUMER_REGISTRATIONS_TOTAL = Counter(
+    "orchestrator_consumer_registrations_total",
+    "External consumer registry mutations by outcome.",
+    ["outcome"],
+)
+
+CONSUMER_INVOCATIONS_TOTAL = Counter(
+    "orchestrator_consumer_invocations_total",
+    "Outbound capability-dispatch invocations by capability and outcome.",
+    ["capability", "outcome"],
+)
+
+CONSUMER_INGESTIONS_TOTAL = Counter(
+    "orchestrator_consumer_ingestions_total",
+    "Consumer data-plane pushes by type and outcome.",
+    ["type", "outcome"],
+)
+
+
+def observe_consumer_registration(outcome: str) -> None:
+    CONSUMER_REGISTRATIONS_TOTAL.labels(outcome=outcome or "unknown").inc()
+
+
+def observe_consumer_invocation(capability: str, outcome: str) -> None:
+    CONSUMER_INVOCATIONS_TOTAL.labels(
+        capability=capability or "unknown",
+        outcome=outcome or "unknown",
+    ).inc()
+
+
+def observe_consumer_ingestion(ingestion_type: str, outcome: str) -> None:
+    CONSUMER_INGESTIONS_TOTAL.labels(
+        type=ingestion_type or "unknown",
+        outcome=outcome or "unknown",
+    ).inc()
