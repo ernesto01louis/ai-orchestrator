@@ -1291,3 +1291,46 @@ The four stub pages (Campaigns, Live Logs, Memory & Gates, Config)
 render placeholders with planned content + endpoint lists. They
 will be designed in a follow-up handoff — see the "Phase 2.6.x
 follow-ups" entry in ROADMAP.md.
+
+## External consumer registry (Phase 3.6)
+
+External research projects register as *consumers* (`POST
+/consumers/register`), declare capabilities, push data in
+(`/consumers/{id}/{memory,vault,notify,evidence}`), and can be
+dispatched work via `POST /capabilities/{capability}/invoke`.
+
+### No database migration
+
+The registry lives in `memory/consumers.json` (JSON-canonical,
+file-locked). There is **no Postgres table and no alembic migration**
+for Phase 3.6 — nothing to apply on LXC 202. Deploying the feature is
+a plain `git pull` + service restart.
+
+### Activating
+
+The registry endpoints are always available (bearer-auth gated) the
+moment the new code is deployed — nothing to flip. To verify:
+
+```bash
+TOKEN=$(grep ORCHESTRATOR_API_TOKEN .env | cut -d= -f2)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -X POST http://127.0.0.1:8000/consumers/register \
+  -H 'Content-Type: application/json' \
+  -d '{"consumer_id":"smoke","name":"smoke","base_url":"http://127.0.0.1:9","capabilities":[]}'
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/consumers
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -X DELETE http://127.0.0.1:8000/consumers/smoke
+```
+
+### Consumer-health daemon
+
+`consumers.health_poll_seconds` in `config.json` (default `0`) keeps
+the background daemon that probes each registered consumer's
+`/healthz` dormant. Set a positive interval to enable it; the daemon
+starts on the next service restart.
+
+### Disabling
+
+Set `consumers.enabled` to `false` and restart. The endpoints stay
+mounted but the operator should treat the feature as off; existing
+`consumers.json` entries are left untouched.

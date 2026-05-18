@@ -633,6 +633,51 @@ description from a vision model when available.
   Default is ``0`` (live data) since the backend bridging is in
   place.
 
+**External consumer registry (Phase 3.6):**
+- Generic, domain-neutral surface for external research projects
+  (rf-direction-finding, aero-research-platform, …) to register as
+  *consumers*, declare capabilities, push data in, and expose
+  capability endpoints the orchestrator can dispatch work to. Driven
+  by the rf-direction-finding Stage 7 integration; any consumer
+  project benefits, so it lives in the orchestrator per the
+  platform-not-hub test.
+- Routes in ``api/routes/consumers.py`` (own ``APIRouter``, wired in
+  ``api/routes/__init__.py``):
+    * ``POST /consumers/register`` — idempotent upsert (name,
+      base_url, capabilities, callback_token, description).
+    * ``GET /consumers`` / ``GET /consumers/{id}`` — discovery.
+    * ``DELETE /consumers/{id}`` — deregister.
+    * ``POST /consumers/{id}/heartbeat`` — liveness ping.
+    * ``POST /capabilities/{capability}/invoke`` — outbound proxy:
+      finds the consumer offering the capability, POSTs to its
+      ``base_url`` presenting the stored ``callback_token``, returns
+      the result. Bounded by ``consumers.dispatch_timeout_seconds``.
+    * ``POST /consumers/{id}/{memory,vault,notify,evidence}`` —
+      data-plane push (Hindsight memory, L5 vault note, ntfy alert,
+      consumer-schema evidence bundle). Each push is gated 403 unless
+      the consumer declared the matching generic capability
+      (``memory.write`` / ``vault.write`` / ``notify.send`` /
+      ``evidence.push``).
+- ``consumers.json`` under ``memory/`` is the registry — JSON
+  canonical, file-locked via ``core.locks``. **No Postgres mirror**:
+  the map is small, read on demand, with no aggregate-query need.
+  ``load_consumers`` / ``save_consumers`` in ``memory_pkg``.
+- The ``callback_token`` a consumer supplies is an *outbound*
+  credential the orchestrator presents when invoking that consumer
+  (not a verification secret) — stored usable in ``consumers.json``,
+  redacted to a ``has_callback_token`` flag in every GET response.
+- All endpoints are bearer-auth gated by the existing
+  ``BearerTokenAuthMiddleware`` — no public-path entry.
+- Optional consumer-health daemon (``core/consumer_health.py``,
+  wired into ``app.py:_lifespan``) polls each consumer's ``/healthz``
+  and stamps ``last_health``. Ships dormant —
+  ``consumers.health_poll_seconds=0`` default.
+- Prom counters: ``orchestrator_consumer_registrations_total``,
+  ``orchestrator_consumer_invocations_total{capability,outcome}``,
+  ``orchestrator_consumer_ingestions_total{type,outcome}``.
+- Config block ``consumers`` (``enabled`` / ``health_poll_seconds``
+  / ``dispatch_timeout_seconds``) in ``config.example.json``.
+
 **Operator notes — caveats + policies:**
 
 *HITL config precedence.* Three sources for `hitl_mode`, evaluated in
