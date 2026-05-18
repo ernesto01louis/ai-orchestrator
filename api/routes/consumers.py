@@ -7,10 +7,12 @@ declares a set of capabilities. Registration is the discovery surface:
 offer which capabilities.
 
 This module covers the registry (register / list / get / delete /
-heartbeat) and capability dispatch — ``POST /capabilities/{cap}/invoke``
-proxies a call to whichever registered consumer offers the capability.
-The data-plane push endpoints (memory / vault / notify / evidence) are
-appended by a later Phase 3.6 commit but share the helpers here.
+heartbeat), capability dispatch — ``POST /capabilities/{cap}/invoke``
+proxies a call to whichever registered consumer offers the capability —
+and the data-plane push endpoints (``POST /consumers/{id}/{memory,
+vault,notify,evidence}``). Each push is gated on the consumer having
+declared the matching ``memory.write`` / ``vault.write`` /
+``notify.send`` / ``evidence.push`` capability at registration.
 
 Every endpoint is bearer-auth gated by the existing
 ``BearerTokenAuthMiddleware`` — there is no public-path entry for
@@ -21,7 +23,9 @@ usable and redacted out of every GET response.
 """
 from __future__ import annotations
 
+import json
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -30,8 +34,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from core.config import CONSUMERS_DISPATCH_TIMEOUT_SECONDS
-from core.metrics import observe_consumer_invocation, observe_consumer_registration
-from memory_pkg import load_consumers, save_consumers
+from core.metrics import (
+    observe_consumer_ingestion,
+    observe_consumer_invocation,
+    observe_consumer_registration,
+)
+from core.paths import REPO_ROOT
+from memory_pkg import hindsight_retain, load_consumers, save_consumers, vault_write_consumer_note
+from notifications import send_notification
 
 router = APIRouter()
 
@@ -257,4 +267,161 @@ def invoke_capability(
         "capability": capability,
         "consumer_id": provider["consumer_id"],
         "result": result,
+    }
+
+
+# ── data-plane push ──────────────────────────────────────────────────
+#
+# A consumer pushes data INTO the orchestrator: Hindsight memory, L5
+# vault notes, ntfy notifications, externally-produced evidence
+# bundles. Each push is gated on the consumer having declared the
+# matching generic capability at registration time — declaring
+# "memory.write" / "vault.write" / "notify.send" / "evidence.push"
+# alongside its domain capabilities is opt-in to the data plane.
+
+_PUSH_CAPABILITY = {
+    "memory": "memory.write",
+    "vault": "vault.write",
+    "notify": "notify.send",
+    "evidence": "evidence.push",
+}
+
+# A consumer-supplied bundle_id is used as a directory name — keep it
+# traversal-free.
+_BUNDLE_ID = re.compile(r"^(?!.*\.\.)[a-zA-Z0-9_\-\.]{1,80}$")
+
+
+def _require_capability(
+    record: dict[str, Any], ingestion_type: str
+) -> None:
+    """Raise 403 unless the consumer declared the push capability."""
+    needed = _PUSH_CAPABILITY[ingestion_type]
+    if needed not in (record.get("capabilities") or []):
+        observe_consumer_ingestion(ingestion_type, "forbidden")
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Consumer '{record['consumer_id']}' did not declare the "
+                f"'{needed}' capability"
+            ),
+        )
+
+
+class ConsumerMemoryRequest(BaseModel):
+    """Body for ``POST /consumers/{id}/memory`` — a natural-language
+    narrative Hindsight extracts facts from."""
+
+    content: str = Field(..., min_length=1)
+
+
+@router.post("/consumers/{consumer_id}/memory")
+def consumer_write_memory(
+    consumer_id: str, req: ConsumerMemoryRequest
+) -> dict[str, Any]:
+    """Push a Hindsight memory entry on behalf of a consumer."""
+    _registry, record = _get_consumer_or_404(consumer_id)
+    _require_capability(record, "memory")
+    result = hindsight_retain(req.content, f"consumer-{consumer_id}")
+    outcome = "success" if result is not None else "failure"
+    observe_consumer_ingestion("memory", outcome)
+    return {"status": outcome, "retained": result is not None}
+
+
+class ConsumerVaultRequest(BaseModel):
+    """Body for ``POST /consumers/{id}/vault`` — an L5 vault note."""
+
+    title: str = Field(..., min_length=1)
+    body: str = Field(..., min_length=1)
+    tags: list[str] = Field(default_factory=list)
+
+
+@router.post("/consumers/{consumer_id}/vault")
+def consumer_write_vault(
+    consumer_id: str, req: ConsumerVaultRequest
+) -> dict[str, Any]:
+    """Write an L5 vault note on behalf of a consumer."""
+    _registry, record = _get_consumer_or_404(consumer_id)
+    _require_capability(record, "vault")
+    path = vault_write_consumer_note(consumer_id, req.title, req.body, req.tags)
+    outcome = "success" if path else "failure"
+    observe_consumer_ingestion("vault", outcome)
+    return {"status": outcome, "path": path}
+
+
+class ConsumerNotifyRequest(BaseModel):
+    """Body for ``POST /consumers/{id}/notify`` — an ntfy/Gotify alert."""
+
+    title: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1)
+    priority: int | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+@router.post("/consumers/{consumer_id}/notify")
+def consumer_notify(
+    consumer_id: str, req: ConsumerNotifyRequest
+) -> dict[str, Any]:
+    """Fire a notification on behalf of a consumer.
+
+    ``send_notification`` early-returns when notifications are disabled
+    in config and never raises — the endpoint reports the attempt.
+    """
+    _registry, record = _get_consumer_or_404(consumer_id)
+    _require_capability(record, "notify")
+    send_notification(
+        f"[{consumer_id}] {req.title}",
+        req.message,
+        priority=req.priority,
+        tags=req.tags or None,
+    )
+    observe_consumer_ingestion("notify", "success")
+    return {"status": "sent", "consumer_id": consumer_id}
+
+
+class ConsumerEvidenceRequest(BaseModel):
+    """Body for ``POST /consumers/{id}/evidence``.
+
+    The bundle stays in the consumer's own schema — the orchestrator
+    persists it verbatim under ``campaigns/consumer-<id>/<bundle_id>/``
+    and does not parse or validate the payload. ``bundle_id`` is
+    optional; a ULID-shaped id is generated when omitted.
+    """
+
+    bundle_id: str | None = None
+    bundle: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/consumers/{consumer_id}/evidence")
+def consumer_push_evidence(
+    consumer_id: str, req: ConsumerEvidenceRequest
+) -> dict[str, Any]:
+    """Persist an externally-produced evidence bundle from a consumer."""
+    _registry, record = _get_consumer_or_404(consumer_id)
+    _require_capability(record, "evidence")
+
+    bundle_id = req.bundle_id or uuid.uuid4().hex
+    if not _BUNDLE_ID.match(bundle_id):
+        observe_consumer_ingestion("evidence", "failure")
+        raise HTTPException(
+            status_code=400,
+            detail="bundle_id must be 1-80 chars of [A-Za-z0-9_-.], no '..'",
+        )
+
+    dest_dir = REPO_ROOT / "campaigns" / f"consumer-{consumer_id}" / bundle_id
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        bundle_path = dest_dir / "bundle.json"
+        bundle_path.write_text(json.dumps(req.bundle, indent=2))
+    except OSError as exc:
+        observe_consumer_ingestion("evidence", "failure")
+        raise HTTPException(
+            status_code=500, detail=f"Could not persist bundle: {exc}"
+        ) from None
+
+    observe_consumer_ingestion("evidence", "success")
+    return {
+        "status": "stored",
+        "consumer_id": consumer_id,
+        "bundle_id": bundle_id,
+        "path": str(bundle_path),
     }
