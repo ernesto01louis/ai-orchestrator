@@ -1208,3 +1208,129 @@ bundle picks them up as `references` and emits them as RO-Crate
 Flip `note_discovery.enabled = false` in `config.json` and restart.
 The planner falls back to its existing memory stack on every search
 call; existing `planner_research.json` traces remain on disk.
+
+
+## Operator console (Phase 2.6)
+
+Lives at ``ui/console/`` — a Vite + React 18 + TypeScript SPA served
+from the orchestrator process at ``http://orchestrator:8000/console/``.
+
+### Building
+
+```bash
+cd /opt/ai-orchestrator/ui/console
+npm install            # first time only — pulls ~280 deps
+npm run typecheck      # tsc -b --noEmit
+npm run build          # tsc -b && vite build → ui/console/dist/
+```
+
+After ``npm run build``, restart the orchestrator (or any process
+serving ``app.py``) to pick up the new bundle. The mount is guarded
+by an existence check on ``ui/console/dist/`` so fresh checkouts
+that haven't built yet don't crash on import.
+
+### Developing
+
+For pixel-iteration on existing pages, run Vite's dev server with
+HMR:
+
+```bash
+cd /opt/ai-orchestrator/ui/console
+npm run dev            # http://localhost:5173
+```
+
+Vite proxies ``/api/*`` → ``VITE_API_BASE`` (default
+``http://localhost:8000``) and ``/ws`` → ``ws://...`` with the
+WebSocket protocol enabled. So the orchestrator must be running for
+``/api/health``, ``/api/runs``, etc. to resolve.
+
+To develop without a backend (e.g. visual-only design work on the
+four stub pages), set ``VITE_USE_MOCKS=1`` in ``ui/console/.env``
+and the fixtures in ``src/lib/mocks.ts`` take over — 7 runs, 4
+campaigns, a synthetic ``/ws`` emitter ticking every 750ms.
+
+### Theming
+
+The default theme matches the operator-console aesthetic in the
+handoff prototype: dark oklch palette, IBM Plex Sans/Mono,
+dense-information layout. The ``personal`` theme is an empty
+override stub at ``src/theme/personal.ts`` for the operator's
+future anime-inspired skin.
+
+Toggle in DevTools without a UI switcher:
+
+```js
+window.__setTheme("personal")  // reload picks up the override
+window.__setTheme("default")
+```
+
+This is intentional — the default skin has no theme dropdown.
+
+### Auth
+
+The SPA shell is in ``DEFAULT_PUBLIC_PREFIXES`` so it loads without
+a bearer token. The REST + WS endpoints it calls still respect
+``ORCHESTRATOR_API_TOKEN`` — if you set it for production, the UI
+will load but every panel will be empty until an operator login
+flow is added (Phase 2.6.x follow-up). On the homelab where the
+token is unset, everything just works.
+
+### Verifying
+
+```bash
+# Smoke check
+curl -s http://localhost:8000/console/ | grep 'id="root"'        # SPA index
+curl -s http://localhost:8000/console/dashboard | grep 'id="root"' # deep link
+curl -s http://localhost:8000/metrics.json | python -m json.tool  # backend JSON
+curl -s http://localhost:8000/health | python -m json.tool | grep services
+```
+
+### Deferred to future rounds
+
+The four stub pages (Campaigns, Live Logs, Memory & Gates, Config)
+render placeholders with planned content + endpoint lists. They
+will be designed in a follow-up handoff — see the "Phase 2.6.x
+follow-ups" entry in ROADMAP.md.
+
+## External consumer registry (Phase 3.6)
+
+External research projects register as *consumers* (`POST
+/consumers/register`), declare capabilities, push data in
+(`/consumers/{id}/{memory,vault,notify,evidence}`), and can be
+dispatched work via `POST /capabilities/{capability}/invoke`.
+
+### No database migration
+
+The registry lives in `memory/consumers.json` (JSON-canonical,
+file-locked). There is **no Postgres table and no alembic migration**
+for Phase 3.6 — nothing to apply on LXC 202. Deploying the feature is
+a plain `git pull` + service restart.
+
+### Activating
+
+The registry endpoints are always available (bearer-auth gated) the
+moment the new code is deployed — nothing to flip. To verify:
+
+```bash
+TOKEN=$(grep ORCHESTRATOR_API_TOKEN .env | cut -d= -f2)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -X POST http://127.0.0.1:8000/consumers/register \
+  -H 'Content-Type: application/json' \
+  -d '{"consumer_id":"smoke","name":"smoke","base_url":"http://127.0.0.1:9","capabilities":[]}'
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/consumers
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -X DELETE http://127.0.0.1:8000/consumers/smoke
+```
+
+### Consumer-health daemon
+
+`consumers.health_poll_seconds` in `config.json` (default `0`) keeps
+the background daemon that probes each registered consumer's
+`/healthz` dormant. Set a positive interval to enable it; the daemon
+starts on the next service restart.
+
+### Disabling
+
+Set `consumers.enabled` to `false` and restart. The endpoints stay
+mounted but the operator should treat the feature as off; existing
+`consumers.json` entries are left untouched.

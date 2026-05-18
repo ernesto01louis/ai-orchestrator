@@ -93,9 +93,18 @@ def status(run_id: str):
 
     response = {
         "run_id": run_id,
+        # Phase 2.6 — frontend uses `id` as the run identifier
+        "id": run_id,
         "phase": info["phase"],
         "score": info["score"],
         "completed": info["completed"],
+        # Phase 2.6 — operator-console enrichment (additive)
+        "campaign_id": info.get("campaign_id", ""),
+        "model": info.get("model", ""),
+        "started_at": info.get("started_at"),
+        "paused": info.get("paused"),
+        "hitl_mode": info.get("hitl_mode", "full_auto"),
+        "confidence": info.get("smartpause_confidence"),
     }
 
     if info.get("flow_run_id"):
@@ -171,6 +180,7 @@ def list_runs():
         indexed = run_index.get(rid, {})
         runs.append({
             "run_id": rid,
+            "id": rid,  # Phase 2.6 frontend alias
             "phase": info["phase"],
             "score": info["score"] or indexed.get("score", 0),
             "completed": info["completed"],
@@ -178,6 +188,13 @@ def list_runs():
             "target": info.get("target") or indexed.get("target", ""),
             "has_error": info.get("error") is not None,
             "timestamp": indexed.get("timestamp"),
+            # Phase 2.6 enrichment (additive)
+            "campaign_id": info.get("campaign_id", "") or indexed.get("campaign_id", ""),
+            "model": info.get("model", "") or indexed.get("model", ""),
+            "started_at": info.get("started_at") or indexed.get("timestamp"),
+            "paused": info.get("paused"),
+            "hitl_mode": info.get("hitl_mode", "full_auto"),
+            "confidence": info.get("smartpause_confidence"),
         })
 
     # 3. Runs from persistent index (survived restarts)
@@ -187,6 +204,7 @@ def list_runs():
         seen.add(rid)
         runs.append({
             "run_id": rid,
+            "id": rid,  # Phase 2.6 frontend alias
             "phase": indexed.get("phase", "completed"),
             "score": indexed.get("score", 0),
             "completed": True,
@@ -194,6 +212,14 @@ def list_runs():
             "target": indexed.get("target", ""),
             "has_error": indexed.get("has_error", False),
             "timestamp": indexed.get("timestamp"),
+            # Phase 2.6 enrichment (additive). Historical runs lack
+            # live fields; emit defaults so the response shape is uniform.
+            "campaign_id": indexed.get("campaign_id", ""),
+            "model": indexed.get("model", ""),
+            "started_at": indexed.get("timestamp"),
+            "paused": None,
+            "hitl_mode": "full_auto",
+            "confidence": None,
         })
 
     # 4. Historical runs from log files (catch runs not yet in index)
@@ -233,6 +259,7 @@ def list_runs():
 
             runs.append({
                 "run_id": rid,
+                "id": rid,  # Phase 2.6 frontend alias
                 "phase": phase,
                 "score": 0,
                 "completed": True,
@@ -240,6 +267,13 @@ def list_runs():
                 "target": log_target,
                 "has_error": has_error,
                 "timestamp": ts,
+                # Phase 2.6 enrichment — log-derived runs have no live state
+                "campaign_id": "",
+                "model": "",
+                "started_at": ts,
+                "paused": None,
+                "hitl_mode": "full_auto",
+                "confidence": None,
             })
 
     # Sort: active (not completed) first, then by timestamp descending
@@ -279,6 +313,16 @@ def get_files(run_id: str):
         "project": project,
         "files": files
     }
+
+
+@router.get("/runs/{run_id}/manifest/verify")
+def verify_run_manifest_alias(run_id: str) -> dict[str, Any]:
+    """Phase 2.6 operator-console alias for ``/runs/{run_id}/verify``.
+
+    The frontend's design contract calls this path explicitly. Thin
+    delegation keeps the implementation single-sourced.
+    """
+    return verify_run(run_id)
 
 
 @router.get("/runs/{run_id}/verify")
@@ -367,20 +411,29 @@ def intervene_run(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
     if run_id not in RUN_STATUS:
         raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
 
+    # Phase 2.6: accept the wider set {approve, reject, edit, skip, abort}
+    # — the frontend HITL console wires all five intervene modes; SmartPause
+    # in Phase 3.1 only honored the first three. ``skip`` and ``abort``
+    # delegate to the same intervention queue and the orchestrator loop
+    # decides how to handle them (fall-through to gate-deny path for abort,
+    # gate-pass for skip).
     action = (body or {}).get("action")
-    if action not in ("approve", "reject", "edit"):
+    if action not in ("approve", "reject", "edit", "skip", "abort"):
         raise HTTPException(
             status_code=400,
-            detail=f"action must be one of approve|reject|edit, got: {action!r}",
+            detail=f"action must be one of approve|reject|edit|skip|abort, got: {action!r}",
         )
 
     payload = {"action": action}
     if action == "edit":
-        prompt = (body or {}).get("prompt")
+        # Phase 2.6 — accept both `prompt` (original) and `payload`
+        # (frontend handoff uses this name in src/lib/api.ts). They are
+        # aliases; `prompt` wins if both are present.
+        prompt = (body or {}).get("prompt") or (body or {}).get("payload")
         if not prompt or not isinstance(prompt, str):
             raise HTTPException(
                 status_code=400,
-                detail="action=edit requires a non-empty 'prompt' field",
+                detail="action=edit requires a non-empty 'prompt' (or 'payload') field",
             )
         payload["prompt"] = prompt
 

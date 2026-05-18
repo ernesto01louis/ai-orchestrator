@@ -64,6 +64,10 @@ TOOL_REGISTRY_PATH = str(REPO_ROOT / "tool_registry.json")
 CAMPAIGNS_FILE = Path(MEMORY_DIR) / "campaigns.json"
 CAMPAIGN_TEMPLATES_DIR = REPO_ROOT / "campaigns"
 
+# Consumers (Phase 3.6) — external-consumer registry. JSON canonical;
+# no Postgres mirror (no aggregate-query need today).
+CONSUMERS_FILE = Path(MEMORY_DIR) / "consumers.json"
+
 # Ensure runtime directories exist (idempotent)
 Path(PROJECTS_DIR).mkdir(parents=True, exist_ok=True)
 Path(LOG_DIR).mkdir(parents=True, exist_ok=True)

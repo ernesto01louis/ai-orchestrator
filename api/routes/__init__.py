@@ -459,14 +459,17 @@ UI_DIR = Path("/opt/ai-orchestrator/ui")
 # Sub-module aggregation — audit Stage 5 §D.1 split.
 # ---------------------------------------------------------------
 from . import (  # noqa: E402
+    activity,
     admin,
     burst,
     campaigns,
+    consumers,
     content,
     deployment,
     health,
     identity,
     memory,
+    observability,
     runs,
     websocket,
 )
@@ -480,5 +483,8 @@ router.include_router(identity.router)
 router.include_router(content.router)
 router.include_router(admin.router)
 router.include_router(campaigns.router)
+router.include_router(consumers.router)
 router.include_router(runs.router)
+router.include_router(observability.router)
+router.include_router(activity.router)
 router.include_router(websocket.router)

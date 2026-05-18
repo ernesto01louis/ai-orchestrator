@@ -244,6 +244,14 @@ class RunRecord(BaseModel):
     status: Literal["success", "fail", "aborted", "paused"]
     started_at: datetime
     finished_at: datetime
+    # How this run's code came to be. "llm_pipeline" (default) — the
+    # planner/generator/judge agents produced it, and llm_calls[] carries
+    # the per-call trace. "deterministic" — the run executed a fully
+    # specified recipe with no LLM in the loop (e.g. a CFD campaign whose
+    # bash recipe is fixed in the campaign YAML, run directly). For a
+    # deterministic run an empty llm_calls[] is correct and expected, not
+    # degraded — see core/deterministic_run.py.
+    provenance_mode: Literal["llm_pipeline", "deterministic"] = "llm_pipeline"
 
 
 # ── pluggable evidence calculators ────────────────────

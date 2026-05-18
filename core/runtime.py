@@ -42,6 +42,13 @@ RUN_STATUS: dict = {}
 _run_status_lock = threading.Lock()
 ORCHESTRATOR_PAUSED = False
 
+# Phase 2.6 — operator console probes a flat uptime against this stamp.
+# Captured at module import so reloads or worker restarts surface
+# accurately. Wall-clock time.time() vs datetime.now() doesn't matter
+# because the field is consumed as an elapsed-seconds integer.
+APP_START_TIME = time.time()
+APP_VERSION = "0.3.3-phase3.3"  # bumped per release; mirror in package metadata if/when we ship as a package
+
 # Per-campaign live flags (Phase 1.1). Keyed by campaign_id; entries:
 #   {"phase": "queued"|"running"|"paused"|"completed"|"aborted"|"failed",
 #    "paused": bool, "aborted": bool, "current_run_id": str | None,
@@ -499,6 +506,7 @@ def _init_run_status(run_id: str, **kwargs) -> None:
             "phase": "queued", "score": 0, "completed": False,
             "result": None, "error": None, "_judge_primary_down": False,
             "manifest_status": None,
+            "started_at": datetime.utcnow().isoformat() + "Z",
             **kwargs,
         }
         snapshot = dict(RUN_STATUS[run_id])
@@ -550,4 +558,10 @@ def log(run_id: str, message: str) -> None:
         pass
 
     _update_run_status(run_id, phase=message)
-    _ws_broadcast({"type": "log", "run_id": run_id, "line": line, "phase": message})
+    _ws_broadcast({
+        "type": "log",
+        "run_id": run_id,
+        "line": line,
+        "phase": message,
+        "ts": datetime.utcnow().isoformat() + "Z",
+    })

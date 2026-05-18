@@ -61,6 +61,10 @@ ui/kazuki_sprites.png
 # Generated UI bundles (source stays tracked)
 ui/node_modules/
 ui/dist/
+ui/console/dist/
+ui/console/node_modules/
+ui/console/.tsbuildinfo*
+ui/console/*.tgz
 ui/.git
 *.bak.*
 

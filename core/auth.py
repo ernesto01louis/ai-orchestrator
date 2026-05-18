@@ -34,6 +34,12 @@ DEFAULT_PUBLIC_PATHS: frozenset[str] = frozenset(
     }
 )
 
+# Phase 2.6 — the operator-console SPA must be reachable without a token
+# so the operator can land on the page before they authenticate. The
+# REST/WS endpoints it calls remain protected; the SPA itself is just
+# bundled HTML/CSS/JS with no secrets baked in.
+DEFAULT_PUBLIC_PREFIXES: tuple[str, ...] = ("/console",)
+
 
 def load_token_from_env() -> str | None:
     """Return the configured token, or ``None`` to disable auth."""
@@ -50,10 +56,12 @@ class BearerTokenAuthMiddleware:
         *,
         token: str | None,
         public_paths: Iterable[str] = DEFAULT_PUBLIC_PATHS,
+        public_prefixes: Iterable[str] = DEFAULT_PUBLIC_PREFIXES,
     ) -> None:
         self.app = app
         self._token = token
         self._public_paths: frozenset[str] = frozenset(public_paths)
+        self._public_prefixes: tuple[str, ...] = tuple(public_prefixes)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
@@ -67,6 +75,9 @@ class BearerTokenAuthMiddleware:
             return
         path = scope.get("path", "")
         if path in self._public_paths:
+            await self.app(scope, receive, send)
+            return
+        if any(path == p or path.startswith(p + "/") for p in self._public_prefixes):
             await self.app(scope, receive, send)
             return
 

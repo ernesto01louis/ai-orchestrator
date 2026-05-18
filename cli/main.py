@@ -1,4 +1,4 @@
-"""orchestrator CLI — verify-run, verify-campaign, rotate-logs."""
+"""orchestrator CLI — verify-run, verify-campaign, rotate-logs, build-bundle."""
 from __future__ import annotations
 
 import argparse
@@ -112,6 +112,25 @@ def _cmd_rotate_logs(args: argparse.Namespace) -> int:
     return 1 if summary.errors else 0
 
 
+def _cmd_build_bundle(args: argparse.Namespace) -> int:
+    # Heavy import (pluggy + signing + rocrate) — keep it lazy so the
+    # other subcommands stay fast, matching the rotate-logs pattern.
+    from evidence.builder import build_bundle  # noqa: PLC0415
+
+    try:
+        bundle = build_bundle(args.campaign_id)
+    except KeyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    n_det = sum(1 for r in bundle.runs if r.provenance_mode == "deterministic")
+    n_llm = len(bundle.runs) - n_det
+    print(f"OK: bundle {bundle.bundle_id} for campaign {args.campaign_id}")
+    print(f"  runs   : {len(bundle.runs)} ({n_det} deterministic, {n_llm} llm-pipeline)")
+    print(f"  crate  : campaigns/{args.campaign_id}/")
+    print(f"  verify : python -m evidence.verify --crate-dir campaigns/{args.campaign_id}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="orchestrator",
@@ -169,6 +188,15 @@ def main(argv: list[str] | None = None) -> int:
         help="report what would happen without modifying any files",
     )
     p_rotate.set_defaults(func=_cmd_rotate_logs)
+
+    p_bundle = sub.add_parser(
+        "build-bundle",
+        help="build + sign a citation-grade evidence bundle for a campaign",
+    )
+    p_bundle.add_argument(
+        "campaign_id", metavar="CAMPAIGN_ID", help="campaign ID to bundle"
+    )
+    p_bundle.set_defaults(func=_cmd_build_bundle)
 
     args = parser.parse_args(argv)
     return args.func(args)

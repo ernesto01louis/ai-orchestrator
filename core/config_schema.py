@@ -434,6 +434,30 @@ class WebIngestConfig(_FlexModel):
     skip_if_exists: bool = True
 
 
+class ConsumersConfig(_FlexModel):
+    """Phase 3.6 external consumer registry + capability dispatch.
+
+    A *consumer* is an external research project (rf-direction-finding,
+    aero-research-platform, …) that registers with the orchestrator,
+    declares a set of capabilities, and either pushes data in (memory /
+    vault / notifications / evidence) or exposes capability endpoints the
+    orchestrator can dispatch work to.
+
+    The registry itself is always available (the endpoints are
+    bearer-auth gated and inert until something registers).
+    ``health_poll_seconds`` controls the optional background daemon that
+    probes each registered consumer's ``/healthz``; ``0`` (the default)
+    keeps it dormant so a fresh deploy makes no outbound calls.
+
+    ``dispatch_timeout_seconds`` bounds an outbound capability-invoke
+    proxy call so a slow consumer can't hang the caller.
+    """
+
+    enabled: bool = True
+    health_poll_seconds: int = 0
+    dispatch_timeout_seconds: float = 30.0
+
+
 class OrchestratorSettings(_FlexModel):
     """Validated view of config.json.
 
@@ -473,3 +497,4 @@ class OrchestratorSettings(_FlexModel):
     chunking: ChunkingConfig = ChunkingConfig()
     eval: EvalConfig = EvalConfig()
     web_ingest: WebIngestConfig = WebIngestConfig()
+    consumers: ConsumersConfig = ConsumersConfig()

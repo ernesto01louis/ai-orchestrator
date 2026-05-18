@@ -129,13 +129,49 @@ def create_campaign(req: CampaignCreate):
 
 @router.get("/campaigns")
 def list_campaigns():
-    """List all campaigns with summary fields (id, name, status, run_count, mean_score)."""
+    """List all campaigns with summary fields (id, name, status, run_count, mean_score).
+
+    Phase 2.6: response is enriched with hitl_mode, children/completed/failed
+    counts, started_at, budget summary, and grid (template params) so the
+    operator-console Dashboard + Campaigns page can render without N+1
+    fetches. All new fields are additive.
+    """
+    from core import budget as _budget  # noqa: PLC0415
+    from core import config as _config  # noqa: PLC0415
+
     campaigns = load_campaigns()
     out = []
     for cid, c in campaigns.items():
         runs = c.get("runs", [])
         scores = [r.get("score", 0) for r in runs if r.get("score") is not None]
         mean = sum(scores) / len(scores) if scores else None
+
+        # Phase 2.6 — children counts derived from per-run status
+        completed_runs = sum(1 for r in runs if r.get("status") == "completed")
+        failed_runs = sum(1 for r in runs if r.get("status") == "failed")
+
+        # Phase 2.6 — budget summary inlined (avoids per-row /budget fetch)
+        budget_used = float(c.get("budget_used_usd", 0.0) or 0.0)
+        budget_total_raw = c.get("budget_total_usd")
+        budget_total = float(budget_total_raw) if budget_total_raw is not None else None
+        budget_pct = _budget.percentage_used(budget_used, budget_total)
+        budget_state_raw = str(c.get("budget_state", "ok") or "ok")
+        # Map backend state vocabulary to frontend tone tags.
+        # Backend: ok | warning | breach | paused
+        # Frontend: healthy | warn | err
+        budget_tone_map = {
+            "ok": "healthy",
+            "warning": "warn",
+            "breach": "err",
+            "paused": "err",
+        }
+        budget = {
+            "used": budget_used,
+            "total": budget_total if budget_total is not None else 0.0,
+            "percentage": budget_pct if budget_pct is not None else 0.0,
+            "state": budget_tone_map.get(budget_state_raw, "healthy"),
+        }
+
         out.append({
             "id": cid,
             "name": c.get("name"),
@@ -144,7 +180,16 @@ def list_campaigns():
             "mean_score": mean,
             "created_at": c.get("created_at"),
             "updated_at": c.get("updated_at"),
+            # Phase 2.6 additions (additive — no consumer breakage)
+            "hitl_mode": c.get("hitl_mode", "full_auto"),
+            "children": len(runs),
+            "completed": completed_runs,
+            "failed": failed_runs,
+            "started_at": c.get("created_at"),
+            "budget": budget,
+            "grid": c.get("params", {}) or {},
         })
+        _ = _config  # imported above for forward-compat with budget rate lookups
     return {"campaigns": out}
 
 

@@ -47,7 +47,7 @@ from core.locks import locked_read_json, locked_write_json
 from core.paths import (
     PROMPT_INDEX, EMBED_CACHE, NEGATIVE_MEMORY, MODEL_STATS,
     IDENTITY_FILE, PRIMER_FILE, GOALS_FILE, SESSION_LOG,
-    TARGET_IDENTITY_DIR, CAMPAIGNS_FILE,
+    TARGET_IDENTITY_DIR, CAMPAIGNS_FILE, CONSUMERS_FILE,
 )
 from core.runtime import RUN_STATUS, log
 from prefect import task
@@ -101,6 +101,20 @@ def save_campaigns(data, changed_ids=None):
         # mirror_campaigns already swallows; this catch covers a stray
         # import-time error so save_campaigns never raises.
         pass
+
+
+def load_consumers():
+    """Load the external-consumer registry keyed by consumer_id (Phase 3.6).
+
+    JSON is canonical — there is no Postgres mirror for the registry
+    (no aggregate-query need; the map is small and read on demand).
+    """
+    return locked_read_json(CONSUMERS_FILE, {})
+
+
+def save_consumers(data):
+    """Persist the external-consumer registry to JSON (Phase 3.6)."""
+    locked_write_json(CONSUMERS_FILE, data)
 
 
 # ------------------------------------------------
@@ -1178,7 +1192,8 @@ def format_hindsight_recall_for_planner(recall_result):
 
 def _vault_ensure_dirs():
     """Create local vault directory structure."""
-    for subdir in ["runs", "projects", "models", "targets", "errors", "daily"]:
+    for subdir in ["runs", "projects", "models", "targets", "errors",
+                   "daily", "consumers"]:
         Path(VAULT_LOCAL_DIR, subdir).mkdir(parents=True, exist_ok=True)
 
 if VAULT_ENABLED:
@@ -1206,6 +1221,45 @@ def vault_write_local(subdir, filename, content):
     except OSError as e:
         print(f"Vault write failed: {filepath}: {e}")
         return None
+
+
+def vault_write_consumer_note(consumer_id, title, body, tags=None):
+    """Write an L5 vault note on behalf of a registered consumer (Phase 3.6).
+
+    Consumers (rf-direction-finding, aero-research-platform, …) push
+    their own artifact notes — calibration matrices, geometry presets,
+    model cards — through ``POST /consumers/{id}/vault``. The note lands
+    under the ``consumers/`` vault subdir with YAML frontmatter that
+    records the originating consumer so the vault stays attributable.
+
+    Returns the written file path, or None when the vault is disabled.
+    """
+    if not VAULT_ENABLED:
+        return None
+
+    safe_consumer = _vault_safe_name(consumer_id)
+    safe_title = _vault_safe_name(title)
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    time_str = datetime.utcnow().strftime("%H:%M UTC")
+    filename = f"{date_str}_{safe_consumer}_{safe_title}.md"
+
+    tag_line = ", ".join(["consumer", safe_consumer, *(tags or [])])
+    content = (
+        f"---\n"
+        f"consumer: {consumer_id}\n"
+        f"title: {title}\n"
+        f"date: {date_str}\n"
+        f"time: {time_str}\n"
+        f"tags: [{tag_line}]\n"
+        f"---\n\n"
+        f"# {title}\n\n"
+        f"{body}\n"
+    )
+
+    path = vault_write_local("consumers", filename, content)
+    if path:
+        vault_sync_file("consumers", filename, f"consumer-{safe_consumer}")
+    return path
 
 
 def vault_sync_to_remote(run_id="vault-sync"):
