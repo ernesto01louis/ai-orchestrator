@@ -27,7 +27,7 @@ License: **Apache 2.0** (`LICENSE` file at repo root).
 ## Module layout (post Phase 0.g)
 
 ```
-app.py                      ~300 lines  FastAPI wiring + lifespan + MCP mount + import wall
+app.py                      ~410 lines  FastAPI wiring + lifespan + MCP mount + import wall
 core/                                    Foundational primitives
   paths.py / config.py / locks.py / runtime.py
 llm/                                     Ollama client, JSON repair, code extraction
@@ -757,7 +757,8 @@ See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase task list.
 
 ### Phase 0 — DONE (v0.1.0-phase0)
 
-`app.py` shrunk from 7,523 → 303 lines. Module split per the table above.
+`app.py` shrunk from 7,523 → 303 lines at the split (since grown to ~410 as
+later phases added lifespan startup wiring). Module split per the table above.
 Tests, secrets in `.env`, `_ws_broadcast` cross-thread fix, dead stub
 removal, ruff/mypy/CI scaffold all landed. See `git log v0.1.0-phase0`.
 

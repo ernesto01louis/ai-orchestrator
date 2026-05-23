@@ -83,8 +83,10 @@ app = FastAPI()
 # responses pass back through CORS and gain Access-Control-Allow-Origin
 # headers before reaching the browser.
 
-# Bearer-token auth (Phase 1.7). No-op when ORCHESTRATOR_API_TOKEN is unset.
-app.add_middleware(BearerTokenAuthMiddleware, token=load_token_from_env())
+# Bearer-token auth (Phase 1.7). No-op when ORCHESTRATOR_API_TOKEN is unset
+# (open mode); _lifespan logs a loud startup WARNING in that case.
+_api_token = load_token_from_env()
+app.add_middleware(BearerTokenAuthMiddleware, token=_api_token)
 
 # CORS — allow the graph UI and external tools to access the API
 app.add_middleware(
@@ -103,6 +105,16 @@ async def _lifespan(app_instance):
     # Capture the running event loop so background threads can post coroutines
     # back via asyncio.run_coroutine_threadsafe (used by _ws_broadcast).
     set_main_loop(asyncio.get_running_loop())
+
+    # Phase 1.7 — make "open mode" loud. When ORCHESTRATOR_API_TOKEN is unset
+    # the auth middleware allows every REST/MCP/WS request (intentional
+    # backward-compat default), which is easy to ship unknowingly.
+    if _api_token is None:
+        print(
+            "WARNING: API auth DISABLED — ORCHESTRATOR_API_TOKEN is unset; all "
+            "REST/MCP/WS requests are allowed (open mode). Set a token for any "
+            "non-trusted-LAN deployment. See SECURITY.md T4."
+        )
 
     # Start log-rotation daemon (gzip >1d, delete >90d, 24-hour cadence)
     from core.log_rotation import start_rotation_daemon  # noqa: PLC0415

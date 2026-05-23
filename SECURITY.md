@@ -82,16 +82,27 @@ exfiltrate data, install persistence, or pivot.
 
 1. **Hardcoded blocklist** — `tools._TOOL_CMD_BLOCKLIST` rejects
    `rm -rf /`, `mkfs`, fork bombs, pipe-to-shell, common reverse-shell
-   patterns. **Cannot be overridden**; no learning path.
+   patterns. **Cannot be overridden**; no learning path. Note this is a
+   pattern-based defense-in-depth heuristic, **not an exhaustive filter** —
+   obfuscation (shell quoting, base64, `$()`, command chaining) can evade
+   the regexes. The real boundary is the SSH user's own permissions plus
+   the sudo allowlist (T2), not this list.
 2. **Gates (learned safety)** — [gates.py](gates.py) auto-promotes
-   repeated failure patterns to blocking rules after N occurrences
-   (default N=3). Operator-visible at `/gates*`. Phase 3.1 routes
-   gate denials through HITL when `hitl_mode != "full_auto"` so the
-   operator gets a notification with approve / reject buttons before
-   the gate fires (in non-`full_auto` campaigns).
+   repeated failure patterns in two stages: a **warn** gate after
+   `AUTO_PROMOTE_THRESHOLD` occurrences (default 3 — logged but allowed),
+   then **auto-escalation of that gate to a hard block** after
+   `AUTO_BLOCK_THRESHOLD` occurrences (default 6). Operators can also
+   escalate manually at `/gates*`. Phase 3.1 routes gate denials through
+   HITL when `hitl_mode != "full_auto"` so the operator gets a
+   notification with approve / reject buttons before the gate fires (in
+   non-`full_auto` campaigns).
 3. **Verify-then-deploy** — generated code runs in a sandbox first
    (`execution/__init__.py:sandbox_execute`) before being deployed
-   to a real SSH target.
+   to a real SSH target. "Sandbox" here means an **earlier-stage SSH
+   execution against a separate working directory — not OS-level
+   isolation** (no container, namespace, or chroot). Code is constrained
+   only by the SSH user's permissions and the sudo allowlist; treat it as
+   a staging gate, not a containment boundary.
 4. **Path safety** — file path inputs are validated by `SAFE_FILENAME`
    (no `..`, no `/`) plus a `Path.resolve()` containment check in
    every vault / artifact writer.
@@ -214,10 +225,10 @@ Cosmetic.
 
 | Layer | What it does | Where |
 |---|---|---|
-| 1. Hardcoded blocklist | Always rejects known-malicious patterns | `tools._TOOL_CMD_BLOCKLIST` |
-| 2. Gates (learned) | Auto-promotes repeated failures to blocks | [gates.py](gates.py) |
+| 1. Hardcoded blocklist | Rejects known-malicious patterns (defense-in-depth heuristic, not exhaustive) | `tools._TOOL_CMD_BLOCKLIST` |
+| 2. Gates (learned) | Auto-promotes repeated failures to a warn gate (N=3), then auto-escalates it to block (N=6) | [gates.py](gates.py) |
 | 3. HITL routing | Gate denials → operator approve/reject | `core/hitl.py` (Phase 3.1) |
-| 4. Sandbox-first | Code runs in sandbox before SSH target | `execution/__init__.py` |
+| 4. Sandbox-first | Staging SSH run (separate dir) before the real target — not OS isolation | `execution/__init__.py` |
 | 5. Path safety | SAFE_FILENAME + Path.resolve containment | `core/paths.py` |
 | 6. Bearer-token auth | Gates REST + MCP + WS | `core/auth.py` (Phase 1.7) |
 | 7. DSSE signing | Tamper-evident evidence bundles | `evidence/signing.py` (Phase 1.2) |
@@ -235,9 +246,11 @@ timeout per send. Background threads (the run thread spawned by
 
 - `requirements.txt` is pinned. Dependabot scans weekly
   (`.github/dependabot.yml`).
-- `pip-audit` recommended periodically; rotate any flagged transitive
-  deps via a `chore(deps-py)` PR.
-- `requirements-cloud.txt`, `requirements-eval.txt`, and (after PR 3)
+- `pip-audit`, `bandit`, and `gitleaks` run on every push / PR via
+  [`.github/workflows/security.yml`](.github/workflows/security.yml)
+  (advisory for now). Rotate any flagged transitive deps via a
+  `chore(deps-py)` PR.
+- `requirements-cloud.txt`, `requirements-eval.txt`, and
   `requirements-plugins.txt` are optional extras — installed only by
   operators who flip the relevant `enabled=true` flag.
 
@@ -245,8 +258,9 @@ timeout per send. Background threads (the run thread spawned by
 
 Every push triggers `.github/workflows/ci.yml`: ruff + mypy + pytest +
 (after PR 2) coverage with a 70% gate (target 80% — ROADMAP success
-criterion). Branch protection on `main` (Phase 0 deferred,
-operator-action) requires this to be green before merge.
+criterion). A companion `.github/workflows/security.yml` runs
+pip-audit + bandit + gitleaks (advisory). Branch protection on `main`
+(Phase 0 deferred, operator-action) requires CI to be green before merge.
 
 ## What's *not* a security boundary
 
