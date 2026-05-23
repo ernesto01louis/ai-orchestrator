@@ -6,7 +6,7 @@
 ## Module layout
 
 ```
-app.py                  (~300 lines)  FastAPI wiring + lifespan + MCP mount + import wall
+app.py                  (~410 lines)  FastAPI wiring + lifespan + MCP mount + import wall
 core/                                   Foundational primitives (no orchestrator deps)
   paths.py                              Filesystem path constants; mkdir()s on import.
   config.py                             Loads config.json once; exposes derived constants.

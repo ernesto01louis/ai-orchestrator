@@ -2,8 +2,9 @@
 Gates — Self-Learning Pre-Execution Safety Layer
 
 Runs before every tool call and SSH command. Checks against learned rules,
-logs incidents as lessons, and auto-promotes frequent mistakes into permanent
-blocking gates.
+logs incidents as lessons, and auto-promotes frequent mistakes into gates —
+first as warn-level (logged but allowed), then auto-escalated to hard blocks
+once the pattern keeps recurring past a higher threshold.
 
 Architecture:
   - gates.json         : permanent blocking rules (auto-promoted + manual)
@@ -13,7 +14,7 @@ Architecture:
 Flow:
   1. Pre-execution:  check_gate(command, tool_name, args, run_id) -> allow/block
   2. On incident:    record_lesson(command, reason, context, run_id, source)
-  3. Consolidation:  consolidate_lessons() -> auto-promote frequent patterns
+  3. Consolidation:  consolidate_lessons() -> auto-promote (warn) + auto-escalate (block)
 """
 
 import fcntl
@@ -34,8 +35,13 @@ except ImportError:  # standalone use without core/ on path
     LESSONS_DIR = "/opt/ai-orchestrator/memory/lessons"
     GATES_LOG = "/opt/ai-orchestrator/memory/gates_log.json"
 
-# Auto-promotion threshold: if a lesson pattern appears this many times, it becomes a gate
+# Auto-promotion thresholds (two-stage). A repeated failure pattern first
+# becomes a *warn* gate at AUTO_PROMOTE_THRESHOLD occurrences (logged but
+# allowed), then auto-escalates to a hard *block* at AUTO_BLOCK_THRESHOLD.
+# Operators can also escalate manually at /gates*. AUTO_BLOCK_THRESHOLD must
+# stay strictly greater than AUTO_PROMOTE_THRESHOLD.
 AUTO_PROMOTE_THRESHOLD = 3
+AUTO_BLOCK_THRESHOLD = 6
 
 # Maximum lessons to keep before forcing consolidation
 MAX_LESSONS = 500
@@ -143,6 +149,32 @@ def toggle_gate(gate_id, enabled=True):
             gate["enabled"] = enabled
             break
     save_gates(data)
+
+
+def escalate_gate_severity(gate_id, severity, reason=None):
+    """Raise an existing gate's severity in place (e.g. warn -> block).
+
+    Used by two-stage auto-promotion to harden a warn gate into a block once
+    its pattern keeps recurring. Only ever raises toward "block"; it never
+    downgrades a block back to warn. Returns the updated gate dict, or None
+    if no gate matched ``gate_id``.
+    """
+    data = load_gates()
+    updated = None
+    for gate in data["gates"]:
+        if gate["id"] == gate_id:
+            if gate.get("severity") == "block" and severity == "warn":
+                # Never downgrade a hard block back to warn.
+                return gate
+            gate["severity"] = severity
+            if reason:
+                gate["reason"] = reason
+            gate["escalated"] = datetime.utcnow().isoformat()
+            updated = gate
+            break
+    if updated is not None:
+        save_gates(data)
+    return updated
 
 
 # ------------------------------------------------
@@ -310,8 +342,14 @@ def load_all_lessons():
 @task(name="consolidate_lessons", retries=2)
 def consolidate_lessons(dry_run=False, log_fn=None):
     """
-    Scan all lessons, count pattern frequency, and auto-promote
-    patterns that appear >= AUTO_PROMOTE_THRESHOLD times into gates.
+    Scan all lessons, count pattern frequency, and auto-promote patterns
+    that recur often into gates (two-stage):
+      * >= AUTO_PROMOTE_THRESHOLD occurrences -> a new "warn" gate (logged
+        but allowed). A pattern already at >= AUTO_BLOCK_THRESHOLD on first
+        sight is created directly as "block".
+      * >= AUTO_BLOCK_THRESHOLD occurrences -> an existing auto-promoted
+        "warn" gate is escalated in place to "block".
+    Manual gates and existing "block" gates are never modified here.
 
     Args:
         dry_run: if True, report what would be promoted but don't do it
@@ -362,42 +400,76 @@ def consolidate_lessons(dry_run=False, log_fn=None):
 
     promoted = []
     existing_gates = load_gates()
-    existing_patterns = {g["pattern"] for g in existing_gates.get("gates", [])}
+    existing_by_pattern = {g["pattern"]: g for g in existing_gates.get("gates", [])}
 
     for pattern, count in promotable.items():
         # Convert the generalized pattern into a regex
         regex = _pattern_to_regex(pattern)
+        desired = "block" if count >= AUTO_BLOCK_THRESHOLD else "warn"
+        reasons = pattern_reasons.get(pattern, ["repeated failure pattern"])
 
-        if regex in existing_patterns:
+        existing = existing_by_pattern.get(regex)
+        if existing is not None:
+            # Two-stage escalation: harden an auto-promoted warn gate into a
+            # block once the pattern recurs past AUTO_BLOCK_THRESHOLD. Manual
+            # gates and already-block gates are left untouched.
+            if (
+                desired == "block"
+                and existing.get("severity") == "warn"
+                and existing.get("source") == "auto-promoted"
+            ):
+                combined_reason = (
+                    f"Auto-escalated to block ({count} occurrences): "
+                    f"{'; '.join(reasons[:3])}"
+                )
+                entry = {
+                    "pattern": pattern,
+                    "regex": regex,
+                    "count": count,
+                    "gate_id": existing["id"],
+                    "severity": "block",
+                    "escalated": True,
+                    "reasons": reasons[:3],
+                }
+                if not dry_run:
+                    escalate_gate_severity(existing["id"], "block", reason=combined_reason)
+                    if log_fn:
+                        log_fn("gates", f"auto-escalated gate to block: {regex} ({count} occurrences)")
+                else:
+                    entry["would_escalate"] = True
+                promoted.append(entry)
+            # else: gate already present at adequate severity -> nothing to do
             continue
 
-        reasons = pattern_reasons.get(pattern, ["repeated failure pattern"])
+        # No gate yet for this pattern: create one (warn, or block directly if
+        # it is already past the block threshold on first consolidation).
         combined_reason = f"Auto-promoted ({count} occurrences): {'; '.join(reasons[:3])}"
-
         if not dry_run:
             gate = add_gate(
                 pattern=regex,
                 reason=combined_reason,
                 source="auto-promoted",
-                severity="warn",  # start as warn, user can escalate to block
+                severity=desired,  # warn first; user/auto-escalation flips to block
             )
             promoted.append({
                 "pattern": pattern,
                 "regex": regex,
                 "count": count,
                 "gate_id": gate["id"],
-                "reasons": reasons[:3]
+                "severity": desired,
+                "reasons": reasons[:3],
             })
 
             if log_fn:
-                log_fn("gates", f"auto-promoted gate: {regex} ({count} occurrences)")
+                log_fn("gates", f"auto-promoted gate ({desired}): {regex} ({count} occurrences)")
         else:
             promoted.append({
                 "pattern": pattern,
                 "regex": regex,
                 "count": count,
+                "severity": desired,
                 "reasons": reasons[:3],
-                "would_promote": True
+                "would_promote": True,
             })
 
     # Clean up old lesson files (keep only recent ones)

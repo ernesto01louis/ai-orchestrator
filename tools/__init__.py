@@ -113,7 +113,12 @@ def execute_tool(tool_name, args, target, run_id):
         else:
             # local execution (no SSH target)
             try:
-                r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                # shell=True is required here: tool commands rely on shell
+                # semantics (pipes, redirection, globbing). cmd is pre-screened
+                # by _TOOL_CMD_BLOCKLIST above and runs under the orchestrator's
+                # own user — see SECURITY.md T1 (defense-in-depth, not a
+                # containment boundary).
+                r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)  # nosec B602
                 output = r.stdout.strip() or r.stderr.strip() or "[no output]"
                 if r.returncode != 0:
                     record_runtime_failure(cmd, output[:300], tool_name, run_id)

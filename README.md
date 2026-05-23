@@ -15,10 +15,10 @@ capabilities to external research projects via Python / REST / MCP
 contracts. Self-hosted on Proxmox LXCs; designed to survive periods of
 neglect.
 
-**Status:** Phases 0 through 3 shipped (17 tagged releases,
-`v0.1.0-phase0` → `v0.3.4-phase3.4`). Phase 2.6 (operator console)
-is in flight on `feat/phase2.6-new-ui-foundation`. See
-[ROADMAP.md](ROADMAP.md) for the per-phase task list and
+**Status:** Phases 0 through 3 shipped (18 tagged releases,
+`v0.1.0-phase0` → `v0.3.6-phase3.6`), including the Phase 2.6 operator
+console (mounted at `/console`) and the Phase 3.6 external-consumer
+registry. See [ROADMAP.md](ROADMAP.md) for the per-phase task list and
 [VISION.md](VISION.md) for the platform-not-hub principle.
 
 ---

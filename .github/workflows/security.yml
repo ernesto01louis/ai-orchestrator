@@ -1,0 +1,59 @@
+name: Security scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# SECURITY.md "Defense layers" lists pip-audit as recommended; this wires it
+# (plus bandit + gitleaks) into CI. Steps are ADVISORY for now
+# (continue-on-error) — mirroring the "mypy non-blocking in Phase 0" stance in
+# ci.yml — so findings surface on every PR without blocking merges. Flip the
+# continue-on-error flags to false once the baseline is clean.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # gitleaks scans full git history
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install scanners + runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit bandit
+
+      - name: Dependency audit (pip-audit)
+        continue-on-error: true
+        run: pip-audit --progress-spinner off --desc
+
+      - name: Static security lint (bandit)
+        continue-on-error: true
+        run: |
+          bandit -ll -r \
+            app.py gates.py mcp_server.py dream.py \
+            core llm notifications tools execution memory_pkg \
+            orchestration api references_pkg eval_pkg evidence manifest
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
