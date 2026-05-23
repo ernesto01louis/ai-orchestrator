@@ -11,7 +11,7 @@ bcrypt==5.0.0
 # mmh3, pyroaring, StrEnum) are intentionally NOT pinned here — they
 # resolve when an operator installs requirements-plugins.txt, keeping
 # the base install lean.
-cachetools==6.2.6
+cachetools==7.1.4
 certifi==2026.1.4
 cffi==2.0.0
 charset-normalizer==3.4.4
