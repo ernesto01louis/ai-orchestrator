@@ -86,9 +86,10 @@ def healthcheck() -> bool:
         return False
     url = NOTEDISCOVERY_BASE_URL.rstrip("/") + "/health"
     try:
+        nd_timeout = min(5, NOTEDISCOVERY_TIMEOUT_SECONDS)
         resp = requests.get(
             url,
-            timeout=min(5, NOTEDISCOVERY_TIMEOUT_SECONDS),
+            timeout=nd_timeout,
             headers=_api_key_header(),
         )
         if resp.status_code != 200:

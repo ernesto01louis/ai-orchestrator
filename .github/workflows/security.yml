@@ -7,10 +7,11 @@ on:
     branches: [main]
 
 # SECURITY.md "Defense layers" lists pip-audit as recommended; this wires it
-# (plus bandit + gitleaks) into CI. Steps are ADVISORY for now
-# (continue-on-error) — mirroring the "mypy non-blocking in Phase 0" stance in
-# ci.yml — so findings surface on every PR without blocking merges. Flip the
-# continue-on-error flags to false once the baseline is clean.
+# (plus bandit + gitleaks) into CI. bandit + gitleaks are BLOCKING — the
+# baseline is clean: the one High is annotated `# nosec B602` at
+# tools/__init__.py, and the by-design /tmp scratch paths are skipped (B108).
+# pip-audit stays ADVISORY because two flagged CVEs (paramiko CVE-2026-44405,
+# diskcache CVE-2025-69872) have no upstream fix yet.
 
 permissions:
   contents: read
@@ -43,16 +44,18 @@ jobs:
         run: pip-audit --progress-spinner off --desc
 
       - name: Static security lint (bandit)
-        continue-on-error: true
+        # Blocking. B108 (hardcoded /tmp) is skipped: the orchestrator's scratch,
+        # sandbox, and server-log paths under /tmp are intentional on a
+        # single-tenant LXC. The one High (subprocess shell=True) carries a
+        # `# nosec B602` with rationale at tools/__init__.py.
         run: |
-          bandit -ll -r \
+          bandit -ll --skip B108 -r \
             app.py gates.py mcp_server.py dream.py \
             core llm notifications tools execution memory_pkg \
             orchestration api references_pkg eval_pkg evidence manifest
 
       - name: Secret scan (gitleaks)
         uses: gitleaks/gitleaks-action@v2
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
