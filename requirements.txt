@@ -113,7 +113,7 @@ sympy==1.14.0
 # Loosened from `==0.10.0` 2026-05-11 so the opt-in eval extras
 # (deepeval 4.x needs `<0.10`) can install alongside the base. pymupdf4llm
 # (the only base-requirements user of tabulate) is happy with 0.9+.
-tabulate>=0.9,<0.11
+tabulate>=0.10.0,<0.11
 tenacity==9.1.4
 text-unidecode==1.3
 tomli==2.4.1
