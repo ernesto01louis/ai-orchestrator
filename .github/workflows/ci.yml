@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -52,7 +52,7 @@ jobs:
     env:
       PREFECT_API_URL: http://localhost:4200/api
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -110,7 +110,7 @@ jobs:
     env:
       POSTGRES_DSN: postgresql://orchestrator:testpass@localhost:5432/orchestrator
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
